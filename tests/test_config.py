@@ -33,7 +33,7 @@ def test_anchor_method_requires_anchor_price() -> None:
     with pytest.raises(ValueError, match="anchor_price"):
         ProductConfig(
             position_limit=20,
-            strategy_name="stable_anchor",
+            strategy_name="market_making",
             fair_value_method="anchor",
             anchor_price=None,
         )
@@ -59,7 +59,7 @@ def test_anchor_method_requires_anchor_price() -> None:
 def test_product_config_rejects_invalid_args(kwargs: dict[str, object]) -> None:
     base = dict(
         position_limit=20,
-        strategy_name="stable_anchor",
+        strategy_name="market_making",
         fair_value_method="mid",
         anchor_price=None,
     )

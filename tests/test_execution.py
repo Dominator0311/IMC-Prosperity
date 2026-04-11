@@ -28,7 +28,7 @@ def test_execution_engine_generates_aggressive_and_passive_orders() -> None:
     )
     config = ProductConfig(
         position_limit=20,
-        strategy_name="stable_anchor",
+        strategy_name="market_making",
         fair_value_method="anchor",
         anchor_price=10_000.0,
     )

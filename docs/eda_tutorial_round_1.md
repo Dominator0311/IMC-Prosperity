@@ -63,3 +63,41 @@ Rows per product: 20,000 across two days.
    one-sided fills cannot breach the 20-unit position limit.
 5. Flatten hard once the absolute position exceeds 75% of the limit —
    inventory is the primary failure mode, not mispricing.
+
+## Tutorial trade tape quirk (important honesty note)
+
+The tutorial trades CSV only prints EMERALDS activity at exactly three
+prices: **9992**, **10000**, and **10008** — the best bid, the mid,
+and the best ask of a "nominal" book. Any quote strictly inside the
+spread (for example our default maker quotes at 9998 / 10002)
+therefore receives **zero** passive-fill credit under our
+trade-tape-match heuristic.
+
+During Phase 2B we briefly tuned `EMERALDS.maker_edge=8` to land
+quotes exactly at 9992 / 10008 so the passive fill model would match
+the tape and the baseline would report nonzero PnL (+2144). That was
+a simulation artifact:
+
+1. On a real exchange the trade tape will print at many prices, so a
+   strict inside-spread quote is the correct strategic choice and
+   `maker_edge=8` would be strictly worse.
+2. The `passive_allocation` parameter is unvalidated — PnL scales
+   roughly linearly with it and 0.3 is a guess, not an empirical fit.
+
+Phase 2C reverts `EMERALDS.maker_edge` to **2** (a principled
+just-inside-the-spread quote) and accepts a near-zero EMERALDS PnL in
+the tutorial baseline. The baseline is now an honest test that the
+engine runs end-to-end, threads state across iterations, and clips
+inventory correctly — not a performance claim. Phase 3 (fair-value
+inference) and Phase 6 (parameter sweeps) will produce the real tuned
+configuration.
+
+### TOMATOES baseline is drift-lucky
+
+Phase 2B's TOMATOES result (+37 PnL, mostly taker trades) is not
+repeatable edge. The `weighted_mid` estimator lags the drifting mid,
+so our taker fills happen *after* the book has already moved. The
+specific upward drift direction across these two days handed us a few
+fills in a favorable direction by accident. Reverse the drift and the
+same strategy loses money on the same data. Do not treat +37 as
+signal; treat it as simulator noise.

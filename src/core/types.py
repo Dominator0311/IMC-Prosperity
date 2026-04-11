@@ -9,17 +9,26 @@ Design notes:
   we persist through ``traderData``; mutation is explicit and local.
 - ``FairValueEstimate`` and ``SignalIntent`` are frozen so strategy code
   cannot accidentally mutate outputs of the fair value or signal stages.
+  Their container fields (``components``, ``metadata``) are typed as
+  ``Mapping`` and default to ``MappingProxyType({})`` so mutation is
+  rejected at runtime as well as discouraged by the type system.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Literal
 
 Product = str
 Timestamp = int
 Scalar = int | float | str | bool
 ExecutionMode = Literal["idle", "maker", "taker", "recovery", "hybrid"]
+
+
+def _empty_scalar_map() -> Mapping[str, Scalar]:
+    return MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -136,7 +145,7 @@ class FairValueEstimate:
     price: float
     method: str
     confidence: float | None = None
-    components: dict[str, Scalar] = field(default_factory=dict)
+    components: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)
 
 
 @dataclass(frozen=True)
@@ -156,4 +165,4 @@ class SignalIntent:
     sell_above: float | None = None
     quote: QuoteIntent | None = None
     rationale: str = ""
-    metadata: dict[str, Scalar] = field(default_factory=dict)
+    metadata: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)

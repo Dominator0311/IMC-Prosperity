@@ -22,7 +22,7 @@ class _ScriptedTrader:
             products={
                 "P": ProductConfig(
                     position_limit=20,
-                    strategy_name="stable_anchor",
+                    strategy_name="market_making",
                     fair_value_method="anchor",
                     anchor_price=100.0,
                 )
@@ -161,7 +161,7 @@ def test_simulator_respects_position_limit_for_real_trader() -> None:
         products={
             "P": ProductConfig(
                 position_limit=20,
-                strategy_name="stable_anchor",
+                strategy_name="market_making",
                 fair_value_method="anchor",
                 anchor_price=10_000.0,
                 maker_edge=2.0,

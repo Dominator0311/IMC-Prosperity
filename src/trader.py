@@ -4,17 +4,26 @@ Responsibilities of this file are deliberately narrow:
 
 1. Restore persistent state from ``state.traderData``.
 2. Normalize the incoming ``TradingState`` into canonical snapshots.
-3. Dispatch each known product to its configured strategy.
+3. Dispatch each known product to its configured strategy via the
+   ``STRATEGY_REGISTRY`` in ``src/strategies/``.
 4. Route the strategy's intent through execution and risk layers.
 5. Update rolling per-product memory.
 6. Serialize next-iteration state back into ``traderData``.
 7. Return ``(orders, conversions, traderData)``.
 
-This file must never contain product-specific pricing or execution
+This file never contains product-specific pricing or execution
 heuristics. Those live in ``strategies/`` and ``core/``.
+
+Safety: ``run()`` is wrapped in a top-level safety net. If any
+downstream module raises, the trader returns an empty orders dict and
+preserves the previous ``traderData`` so the Prosperity container does
+not crash. Tests can set ``_reraise_exceptions=True`` to opt out and
+surface errors.
 """
 
 from __future__ import annotations
+
+import logging
 
 from src.core.config import EngineConfig, ProductConfig, default_engine_config
 from src.core.execution import ExecutionEngine
@@ -27,13 +36,19 @@ from src.core.state_store import StateStore
 from src.core.types import EngineState, NormalizedSnapshot, ProductMemory
 from src.core.utils import bounded_append
 from src.datamodel import Order, TradingState
-from src.strategies.adaptive_quote import AdaptiveQuoteStrategy
+from src.strategies import STRATEGY_REGISTRY
 from src.strategies.base import BaseStrategy, StrategyContext
-from src.strategies.stable_anchor import StableAnchorStrategy
+
+_LOG = logging.getLogger(__name__)
 
 
 class Trader:
-    def __init__(self, config: EngineConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: EngineConfig | None = None,
+        *,
+        reraise_exceptions: bool = False,
+    ) -> None:
         self.config = config or default_engine_config()
         self.state_store = StateStore(
             version=self.config.state_version,
@@ -45,11 +60,25 @@ class Trader:
         self.execution_engine = ExecutionEngine()
         self.risk_manager = RiskManager()
         self.logger = DecisionLogger()
+        self._reraise_exceptions = reraise_exceptions
+        self.strategies: dict[str, BaseStrategy] = self._build_strategies()
 
-        self.strategies: dict[str, BaseStrategy] = {
-            "stable_anchor": StableAnchorStrategy(self.fair_value_engine, self.signal_engine),
-            "adaptive_quote": AdaptiveQuoteStrategy(self.fair_value_engine, self.signal_engine),
-        }
+    # ---------------------------------------------------------- setup
+
+    def _build_strategies(self) -> dict[str, BaseStrategy]:
+        strategies: dict[str, BaseStrategy] = {}
+        for product_config in self.config.products.values():
+            name = product_config.strategy_name
+            if name in strategies:
+                continue
+            factory = STRATEGY_REGISTRY.get(name)
+            if factory is None:
+                _LOG.warning("Unknown strategy %r for product config; will be skipped", name)
+                continue
+            strategies[name] = factory(self.fair_value_engine, self.signal_engine)
+        return strategies
+
+    # ---------------------------------------------------------- contract
 
     # Some Prosperity rounds require a ``bid()`` method on Trader.
     # Keep this stub so contract changes do not break submissions.
@@ -57,6 +86,23 @@ class Trader:
         return 15
 
     def run(self, state: TradingState) -> tuple[dict[str, list[Order]], int, str]:
+        """Entry point called by the Prosperity container.
+
+        Wraps ``_run_body`` in a top-level safety net. An unhandled
+        exception in any sub-module would otherwise crash the container
+        and lose the iteration entirely.
+        """
+        try:
+            return self._run_body(state)
+        except Exception:
+            _LOG.exception("Trader.run crashed; returning empty orders")
+            if self._reraise_exceptions:
+                raise
+            return {}, 0, state.traderData
+
+    # ---------------------------------------------------------- body
+
+    def _run_body(self, state: TradingState) -> tuple[dict[str, list[Order]], int, str]:
         engine_state = self.state_store.load(state.traderData)
         engine_state.version = self.config.state_version
 
@@ -66,7 +112,6 @@ class Trader:
         for product, snapshot in snapshots.items():
             product_config = self.config.product_config(product)
             if product_config is None:
-                # Unknown product -> no orders, no state side effects.
                 results[product] = []
                 continue
 
@@ -142,16 +187,10 @@ class Trader:
         if snapshot.spread is not None:
             bounded_append(memory.recent_spreads, float(snapshot.spread), history_length)
 
-    # ------------------------------------------------------------- helpers
+    # ---------------------------------------------------------- helpers
 
     def reset(self) -> None:
-        """Drop any transient in-memory state (diagnostics only).
-
-        The live runtime never persists class members between iterations,
-        but offline replay reuses one ``Trader`` instance across many
-        ``run()`` calls. This helper keeps replay deterministic by
-        letting callers clear the local ``DecisionLogger``.
-        """
+        """Drop any transient in-memory state (diagnostics only)."""
         self.logger = DecisionLogger()
 
     def engine_state_from(self, trader_data: str | None) -> EngineState:

@@ -111,12 +111,24 @@ class FillModel:
     ) -> list[Fill]:
         """Match resting maker orders against observed market trades.
 
-        A market trade at price P is treated as evidence that liquidity
-        changed hands at that level. For each of our pending maker
-        orders at P, we credit ourselves with
-        ``floor(trade.quantity * passive_allocation)`` units up to our
-        remaining size. A single trade cannot fill more than its own
-        quantity and cannot double-fill a buy + sell at the same price.
+        A market trade at price P is evidence that liquidity changed
+        hands at that level. Crucially, the direction is ambiguous in
+        the tutorial tape because the ``buyer``/``seller`` fields are
+        anonymized; the trade might have been an aggressive sell into
+        a resting bid, or an aggressive buy lifting a resting offer.
+
+        Allocation rules:
+
+        - If *only* one side of our book (buy or sell) has a pending
+          order at P, that side receives
+          ``min(remaining, floor(trade.quantity * passive_allocation))``
+          units.
+        - If *both* sides have pending orders at P, the allocation is
+          split evenly between them (half to each, rounded down). This
+          is physically unrealistic but deliberately conservative: we
+          cannot know which side of the trade we would have been, so
+          we split the ambiguity instead of greedily crediting both.
+        - A single trade is consumed at most once across both sides.
         """
         if not self.config.passive_fills_enabled or not pending_orders or not market_trades:
             return []
@@ -133,54 +145,62 @@ class FillModel:
         allocation = self.config.passive_allocation
 
         for trade in market_trades:
-            trade_remaining = int(trade.quantity)
-            if trade_remaining <= 0:
+            trade_q = int(trade.quantity)
+            if trade_q <= 0:
                 continue
 
-            # Passive buy at this price? Credit up to our share.
-            if remaining_buy.get(trade.price, 0) > 0 and trade_remaining > 0:
-                share = min(
-                    remaining_buy[trade.price],
-                    int(trade_remaining * allocation),
-                )
-                if share > 0:
-                    fills.append(
-                        Fill(
-                            trade=Trade(
-                                symbol=trade.symbol,
-                                price=trade.price,
-                                quantity=share,
-                                buyer=_SELF_USER_ID,
-                                seller=None,
-                                timestamp=timestamp,
-                            ),
-                            mode="maker",
-                        )
-                    )
-                    remaining_buy[trade.price] -= share
-                    trade_remaining -= share
+            buy_pending = remaining_buy.get(trade.price, 0)
+            sell_pending = remaining_sell.get(trade.price, 0)
+            if buy_pending <= 0 and sell_pending <= 0:
+                continue
 
-            # Passive sell at this price? Credit up to our share.
-            if remaining_sell.get(trade.price, 0) > 0 and trade_remaining > 0:
-                share = min(
-                    remaining_sell[trade.price],
-                    int(trade_remaining * allocation),
-                )
-                if share > 0:
-                    fills.append(
-                        Fill(
-                            trade=Trade(
-                                symbol=trade.symbol,
-                                price=trade.price,
-                                quantity=share,
-                                buyer=None,
-                                seller=_SELF_USER_ID,
-                                timestamp=timestamp,
-                            ),
-                            mode="maker",
-                        )
+            total_credit = int(trade_q * allocation)
+            if total_credit <= 0:
+                continue
+
+            if buy_pending > 0 and sell_pending > 0:
+                # Direction-ambiguous: split the allocation 50/50.
+                half = total_credit // 2
+                buy_share = min(buy_pending, half)
+                sell_share = min(sell_pending, total_credit - buy_share)
+            elif buy_pending > 0:
+                buy_share = min(buy_pending, total_credit)
+                sell_share = 0
+            else:
+                buy_share = 0
+                sell_share = min(sell_pending, total_credit)
+
+            if buy_share > 0:
+                fills.append(
+                    Fill(
+                        trade=Trade(
+                            symbol=trade.symbol,
+                            price=trade.price,
+                            quantity=buy_share,
+                            buyer=_SELF_USER_ID,
+                            seller=None,
+                            timestamp=timestamp,
+                        ),
+                        mode="maker",
                     )
-                    remaining_sell[trade.price] -= share
+                )
+                remaining_buy[trade.price] -= buy_share
+
+            if sell_share > 0:
+                fills.append(
+                    Fill(
+                        trade=Trade(
+                            symbol=trade.symbol,
+                            price=trade.price,
+                            quantity=sell_share,
+                            buyer=None,
+                            seller=_SELF_USER_ID,
+                            timestamp=timestamp,
+                        ),
+                        mode="maker",
+                    )
+                )
+                remaining_sell[trade.price] -= sell_share
 
         return fills
 
@@ -189,6 +209,13 @@ class FillModel:
 
 
 def _match_buy(order: Order, asks: dict[int, int], timestamp: int) -> tuple[list[Fill], int]:
+    """Match a buy order against the ask side.
+
+    Mutates ``asks`` in place: consumed liquidity is subtracted from
+    the level's volume. Callers must pass a local copy if they need
+    the original dict preserved. ``split_taker_and_residual`` already
+    copies the ``OrderDepth`` into a local dict before calling.
+    """
     remaining = order.quantity
     filled: list[Fill] = []
     for price in sorted(asks):
@@ -217,6 +244,10 @@ def _match_buy(order: Order, asks: dict[int, int], timestamp: int) -> tuple[list
 
 
 def _match_sell(order: Order, bids: dict[int, int], timestamp: int) -> tuple[list[Fill], int]:
+    """Match a sell order against the bid side.
+
+    Mutates ``bids`` in place; see ``_match_buy`` for rationale.
+    """
     remaining = -order.quantity
     filled: list[Fill] = []
     for price in sorted(bids, reverse=True):

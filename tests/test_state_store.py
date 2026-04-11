@@ -144,6 +144,37 @@ def test_state_store_rejects_bad_constructor_args() -> None:
 
 
 @pytest.mark.unit
+def test_save_rejects_nan_and_drops_memory_gracefully() -> None:
+    """NaN/Infinity in ProductMemory.values must not produce spec-violating JSON."""
+    store = StateStore(version=1)
+    state = EngineState()
+    memory = state.for_product("P")
+    memory.values["bad"] = float("nan")
+
+    with pytest.warns(RuntimeWarning, match="non-finite"):
+        encoded = store.save(state)
+
+    # The emitted blob must still be standards-compliant JSON.
+    payload = json.loads(encoded)
+    assert payload["version"] == 1
+    # And it must not contain the bad product memory.
+    assert payload["products"] == {}
+
+
+@pytest.mark.unit
+def test_save_rejects_infinity_too() -> None:
+    store = StateStore(version=1)
+    state = EngineState()
+    memory = state.for_product("P")
+    memory.recent_mids.append(float("inf"))
+
+    with pytest.warns(RuntimeWarning):
+        encoded = store.save(state)
+    payload = json.loads(encoded)
+    assert payload["products"] == {}
+
+
+@pytest.mark.unit
 def test_save_preserves_counters_values_flags_round_trip() -> None:
     store = StateStore(version=1)
     state = EngineState()

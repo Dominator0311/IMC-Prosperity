@@ -22,6 +22,7 @@ Guarantees:
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import asdict
 from typing import Any
 
@@ -105,26 +106,40 @@ class StateStore:
            ``truncated_history_keep`` mids/spreads only.
         3. If still too big, drop all product memory and return an
            empty-products marker.
+
+        ``_encode`` uses ``allow_nan=False`` so NaN/Infinity leaking
+        into ``ProductMemory.values`` cannot produce spec-violating
+        JSON that Prosperity's parser would silently reject. If it
+        raises, we drop all memory rather than returning a bad blob.
         """
-        payload = asdict(state)
-        payload["version"] = self.version
+        try:
+            payload = asdict(state)
+            payload["version"] = self.version
 
-        encoded = self._encode(payload)
-        if len(encoded) <= self.max_chars:
-            return encoded
+            encoded = self._encode(payload)
+            if len(encoded) <= self.max_chars:
+                return encoded
 
-        compact: dict[str, Any] = {"version": self.version, "products": {}}
-        for product, memory in state.products.items():
-            compact["products"][product] = {
-                "recent_mids": memory.recent_mids[-self.truncated_history_keep :],
-                "recent_spreads": memory.recent_spreads[-self.truncated_history_keep :],
-                "counters": memory.counters,
-                "flags": memory.flags,
-                "values": memory.values,
-            }
-        encoded = self._encode(compact)
-        if len(encoded) <= self.max_chars:
-            return encoded
+            compact: dict[str, Any] = {"version": self.version, "products": {}}
+            for product, memory in state.products.items():
+                compact["products"][product] = {
+                    "recent_mids": memory.recent_mids[-self.truncated_history_keep :],
+                    "recent_spreads": memory.recent_spreads[-self.truncated_history_keep :],
+                    "counters": memory.counters,
+                    "flags": memory.flags,
+                    "values": memory.values,
+                }
+            encoded = self._encode(compact)
+            if len(encoded) <= self.max_chars:
+                return encoded
+        except ValueError:
+            warnings.warn(
+                "StateStore.save refused to emit non-finite values "
+                "(NaN/Infinity) and dropped all product memory for this "
+                "iteration. Investigate which strategy wrote the bad value.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         return self._encode({"version": self.version, "products": {}})
 
@@ -133,18 +148,26 @@ class StateStore:
     def _migrate(self, raw: dict[str, Any], *, from_version: int) -> dict[str, Any]:
         """Hook for future schema migrations.
 
-        Today we do not need to rewrite anything, but keeping the hook in
-        place means we can bump ``version`` and land a migration without
-        breaking restore semantics in the live trader.
+        The base implementation is a no-op and warns loudly when called
+        with a mismatched ``from_version``. Subclasses should override
+        this to dispatch on ``from_version`` and silently perform
+        whatever rewrites the new schema needs.
         """
-        del from_version  # currently unused
+        if from_version != self.version:
+            warnings.warn(
+                f"StateStore._migrate invoked with from_version={from_version} "
+                f"(current={self.version}) but the base implementation is a no-op. "
+                "Override _migrate or bump the schema carefully.",
+                UserWarning,
+                stacklevel=2,
+            )
         return raw
 
     # ---------------------------------------------------------------- utils
 
     @staticmethod
     def _encode(payload: dict[str, Any]) -> str:
-        return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        return json.dumps(payload, separators=(",", ":"), sort_keys=True, allow_nan=False)
 
     @staticmethod
     def _safe_int(value: Any, default: int) -> int:

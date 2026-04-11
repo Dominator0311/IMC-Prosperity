@@ -12,7 +12,7 @@ from src.core.types import BookLevel, FairValueEstimate, NormalizedSnapshot
 def _config(position_limit: int = 20, flatten_threshold: float = 0.75) -> ProductConfig:
     return ProductConfig(
         position_limit=position_limit,
-        strategy_name="stable_anchor",
+        strategy_name="market_making",
         fair_value_method="anchor",
         anchor_price=10_000.0,
         taker_edge=1.0,
@@ -89,3 +89,36 @@ def test_mild_position_still_skews_but_does_not_flatten() -> None:
     assert intent.mode == "hybrid"
     assert intent.buy_below is not None
     assert intent.sell_above is not None
+
+
+@pytest.mark.unit
+def test_skew_makes_both_taker_thresholds_less_permissive_when_long() -> None:
+    """When long, skew>0 shifts both taker thresholds DOWN.
+
+    Regression guard against the claim that skew could *increase* taker
+    buying into a long position. Lower ``buy_below`` means we require
+    a cheaper ask to cross, i.e. we are *less* eager to buy. The math
+    is correct; this test locks it in.
+    """
+    engine = SignalEngine()
+    neutral = engine.build_market_making_intent("P", _snapshot(0), _fair(), _config())
+    long_pos = engine.build_market_making_intent("P", _snapshot(5), _fair(), _config())
+    assert neutral.buy_below is not None
+    assert long_pos.buy_below is not None
+    assert long_pos.buy_below < neutral.buy_below  # less permissive for buys
+    assert neutral.sell_above is not None
+    assert long_pos.sell_above is not None
+    assert long_pos.sell_above < neutral.sell_above  # more permissive for sells
+
+
+@pytest.mark.unit
+def test_skew_makes_both_taker_thresholds_more_permissive_when_short() -> None:
+    engine = SignalEngine()
+    neutral = engine.build_market_making_intent("P", _snapshot(0), _fair(), _config())
+    short_pos = engine.build_market_making_intent("P", _snapshot(-5), _fair(), _config())
+    assert neutral.buy_below is not None
+    assert short_pos.buy_below is not None
+    assert short_pos.buy_below > neutral.buy_below  # more permissive for buys
+    assert neutral.sell_above is not None
+    assert short_pos.sell_above is not None
+    assert short_pos.sell_above > neutral.sell_above  # less permissive for sells

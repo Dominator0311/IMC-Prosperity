@@ -127,3 +127,45 @@ def test_trader_returns_only_orders_for_the_product_symbol() -> None:
     for order in orders["EMERALDS"]:
         assert isinstance(order, Order)
         assert order.symbol == "EMERALDS"
+
+
+@pytest.mark.integration
+def test_trader_crash_barrier_returns_empty_orders_on_strategy_exception() -> None:
+    """A broken strategy must never crash Trader.run in production mode."""
+    trader = Trader()
+
+    class _Boom:
+        def generate_intent(self, context: object) -> object:
+            raise RuntimeError("intentional explosion")
+
+    trader.strategies["market_making"] = _Boom()  # type: ignore[assignment]
+
+    state = _state(
+        {"EMERALDS": OrderDepth(buy_orders={9998: 5}, sell_orders={10002: -5})},
+        position={"EMERALDS": 0},
+        trader_data="previous_state_blob",
+    )
+    orders, conversions, trader_data = trader.run(state)
+
+    assert orders == {}
+    assert conversions == 0
+    # On crash we preserve the previous trader_data so no state is lost.
+    assert trader_data == "previous_state_blob"
+
+
+@pytest.mark.integration
+def test_trader_crash_barrier_reraises_in_test_mode() -> None:
+    trader = Trader(reraise_exceptions=True)
+
+    class _Boom:
+        def generate_intent(self, context: object) -> object:
+            raise RuntimeError("intentional explosion")
+
+    trader.strategies["market_making"] = _Boom()  # type: ignore[assignment]
+
+    state = _state(
+        {"EMERALDS": OrderDepth(buy_orders={9998: 5}, sell_orders={10002: -5})},
+        position={"EMERALDS": 0},
+    )
+    with pytest.raises(RuntimeError, match="intentional explosion"):
+        trader.run(state)

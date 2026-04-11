@@ -50,7 +50,7 @@ class _ProductAccounting:
     sell_trade_quantity: int = 0
     mark_price: float | None = None
     steps_near_limit: int = 0
-    _seen: bool = False
+    seen: bool = False
 
 
 @dataclass
@@ -115,7 +115,7 @@ class BacktestSimulator:
             # --- mark-to-market and near-limit tracking
             for product, depth in state.order_depths.items():
                 accounting = books[product]
-                accounting._seen = True
+                accounting.seen = True
                 mark = _mid_from_depth(depth)
                 if mark is not None:
                     accounting.mark_price = mark
@@ -172,7 +172,7 @@ class BacktestSimulator:
         per_product: dict[str, ProductResult] = {}
         total_pnl = 0.0
         for product, acct in books.items():
-            if not acct._seen and acct.trade_count == 0:
+            if not acct.seen and acct.trade_count == 0:
                 continue
             mark = acct.mark_price or 0.0
             pnl = acct.cash + acct.position * mark

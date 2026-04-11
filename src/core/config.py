@@ -5,6 +5,14 @@ one product. ``EngineConfig`` bundles a set of product configs with
 runtime-wide knobs such as the state store version and the trader data
 char budget.
 
+Fair value resolution:
+
+- ``fair_value_method`` names the primary estimator.
+- ``fair_value_fallbacks`` is an ordered tuple of estimator names that
+  will be tried in turn if the primary returns ``None`` (missing data,
+  insufficient history, etc.). The doctrine requires a fallback path to
+  always exist; this is where it lives.
+
 Validation happens at construction time so misconfigured runs fail
 immediately instead of producing subtle bad behavior deep inside the
 live loop.
@@ -20,6 +28,7 @@ class ProductConfig:
     position_limit: int
     strategy_name: str
     fair_value_method: str
+    fair_value_fallbacks: tuple[str, ...] = ()
     tick_size: int = 1
     anchor_price: float | None = None
     taker_edge: float = 1.0
@@ -77,20 +86,21 @@ class EngineConfig:
 
 
 def default_engine_config() -> EngineConfig:
+    # Both tutorial products use the shared market-making strategy, differing
+    # only by their fair-value choice. maker_edge is kept at a principled 2
+    # (tick beyond the anchor) rather than the data-fit value of 8 we briefly
+    # used to chase the tutorial trade tape. See docs/eda_tutorial_round_1.md
+    # for why the tutorial replay under-rewards inside-spread makers.
     return EngineConfig(
         products={
-            # EMERALDS maker_edge=8 intentionally quotes at 9992 / 10008
-            # (mid - maker_edge and mid + maker_edge) where the tutorial
-            # trade tape actually prints. Quoting strictly inside the
-            # spread would capture more theoretical edge but produces
-            # zero measurable passive fills in the tutorial replay.
             "EMERALDS": ProductConfig(
                 position_limit=20,
-                strategy_name="stable_anchor",
+                strategy_name="market_making",
                 fair_value_method="anchor",
+                fair_value_fallbacks=("microprice", "mid"),
                 anchor_price=10_000.0,
                 taker_edge=1.0,
-                maker_edge=8.0,
+                maker_edge=2.0,
                 quote_size=5,
                 max_aggressive_size=10,
                 inventory_skew=2.0,
@@ -99,8 +109,9 @@ def default_engine_config() -> EngineConfig:
             ),
             "TOMATOES": ProductConfig(
                 position_limit=20,
-                strategy_name="adaptive_quote",
+                strategy_name="market_making",
                 fair_value_method="weighted_mid",
+                fair_value_fallbacks=("mid", "microprice"),
                 taker_edge=1.0,
                 maker_edge=2.0,
                 quote_size=4,
