@@ -69,6 +69,27 @@ def test_load_ignores_bad_product_payloads() -> None:
 
 
 @pytest.mark.unit
+def test_load_ignores_bool_values_in_float_history_lists() -> None:
+    store = StateStore(version=1)
+    payload = json.dumps(
+        {
+            "version": 1,
+            "products": {
+                "P": {
+                    "recent_mids": [True, 100, False, 101.5],
+                    "recent_spreads": [False, 8, True],
+                }
+            },
+        }
+    )
+
+    restored = store.load(payload)
+
+    assert restored.products["P"].recent_mids == [100.0, 101.5]
+    assert restored.products["P"].recent_spreads == [8.0]
+
+
+@pytest.mark.unit
 def test_save_always_fits_in_max_chars() -> None:
     store = StateStore(version=1, max_chars=120, truncated_history_keep=2, max_history=8)
     state = EngineState(version=1)

@@ -7,6 +7,7 @@ import pytest
 from src.core.config import ProductConfig
 from src.core.fair_value import (
     AnchorEstimator,
+    DepthMidEstimator,
     FairValueEngine,
     MicropriceEstimator,
     MidEstimator,
@@ -100,6 +101,26 @@ def test_weighted_mid_puts_more_weight_on_recent_mids() -> None:
 
 
 @pytest.mark.unit
+def test_depth_mid_uses_all_visible_levels() -> None:
+    snap = NormalizedSnapshot(
+        product="P",
+        timestamp=0,
+        bids=(BookLevel(100, 1), BookLevel(99, 3)),
+        asks=(BookLevel(102, 1), BookLevel(103, 3)),
+        position=0,
+    )
+
+    result = DepthMidEstimator().estimate(snap, ProductMemory(), _mid_config())
+
+    assert result is not None
+    # bid_vwap = (100*1 + 99*3) / 4 = 99.25
+    # ask_vwap = (102*1 + 103*3) / 4 = 102.75
+    assert result.price == pytest.approx(101.0)
+    assert result.components["bid_vwap"] == pytest.approx(99.25)
+    assert result.components["ask_vwap"] == pytest.approx(102.75)
+
+
+@pytest.mark.unit
 def test_engine_primary_falls_through_to_next_when_returning_none() -> None:
     """If weighted_mid has no mid and no history, fall through to anchor."""
     config = ProductConfig(
@@ -144,6 +165,7 @@ def test_estimate_all_returns_every_non_none_estimator() -> None:
     # rolling_mid and weighted_mid work too because snap has a mid
     assert "rolling_mid" in results
     assert "weighted_mid" in results
+    assert "depth_mid" in results
     assert results["anchor"].price == 10_000.0
     assert results["mid"].price == 100.0
 

@@ -141,6 +141,20 @@ def test_passive_fill_handles_both_buy_and_sell_at_same_price() -> None:
 
 
 @pytest.mark.unit
+def test_passive_fill_caps_each_side_at_half_when_both_sides_rest() -> None:
+    model = FillModel(FillModelConfig(passive_allocation=1.0))
+    orders = [Order("P", 100, 1), Order("P", 100, -10)]
+    market_trades = [Trade("P", 100, 5, timestamp=0)]
+
+    fills = model.score_passive_fills(orders, market_trades, timestamp=0)
+
+    buys = [fill.trade.quantity for fill in fills if fill.trade.buyer == "SELF"]
+    sells = [fill.trade.quantity for fill in fills if fill.trade.seller == "SELF"]
+    assert buys == [1]
+    assert sells == [2]
+
+
+@pytest.mark.unit
 def test_passive_allocation_out_of_range_raises() -> None:
     with pytest.raises(ValueError):
         FillModel(FillModelConfig(passive_allocation=1.5))

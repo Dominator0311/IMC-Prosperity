@@ -159,10 +159,12 @@ class FillModel:
                 continue
 
             if buy_pending > 0 and sell_pending > 0:
-                # Direction-ambiguous: split the allocation 50/50.
+                # Direction-ambiguous: split the allocation 50/50 and leave
+                # any unusable remainder uncredited rather than donating it to
+                # the other side.
                 half = total_credit // 2
                 buy_share = min(buy_pending, half)
-                sell_share = min(sell_pending, total_credit - buy_share)
+                sell_share = min(sell_pending, half)
             elif buy_pending > 0:
                 buy_share = min(buy_pending, total_credit)
                 sell_share = 0

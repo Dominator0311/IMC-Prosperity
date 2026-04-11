@@ -146,6 +146,40 @@ class WeightedMidEstimator:
         )
 
 
+class DepthMidEstimator:
+    name = "depth_mid"
+
+    def estimate(
+        self,
+        snapshot: NormalizedSnapshot,
+        memory: ProductMemory,
+        config: ProductConfig,
+    ) -> FairValueEstimate | None:
+        del memory, config
+        if not snapshot.bids or not snapshot.asks:
+            return None
+
+        bid_volume = sum(level.volume for level in snapshot.bids)
+        ask_volume = sum(level.volume for level in snapshot.asks)
+        if bid_volume <= 0 or ask_volume <= 0:
+            return None
+
+        bid_vwap = sum(level.price * level.volume for level in snapshot.bids) / bid_volume
+        ask_vwap = sum(level.price * level.volume for level in snapshot.asks) / ask_volume
+
+        return FairValueEstimate(
+            price=(bid_vwap + ask_vwap) / 2.0,
+            method=self.name,
+            confidence=0.75,
+            components=MappingProxyType(
+                {
+                    "bid_vwap": bid_vwap,
+                    "ask_vwap": ask_vwap,
+                }
+            ),
+        )
+
+
 ESTIMATORS: Mapping[str, Estimator] = MappingProxyType(
     {
         "anchor": AnchorEstimator(),
@@ -153,6 +187,7 @@ ESTIMATORS: Mapping[str, Estimator] = MappingProxyType(
         "microprice": MicropriceEstimator(),
         "rolling_mid": RollingMidEstimator(),
         "weighted_mid": WeightedMidEstimator(),
+        "depth_mid": DepthMidEstimator(),
     }
 )
 

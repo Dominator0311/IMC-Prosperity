@@ -179,7 +179,11 @@ class StateStore:
     def _coerce_float_list(self, value: Any) -> list[float]:
         if not isinstance(value, list):
             return []
-        coerced = [float(item) for item in value if isinstance(item, (int, float))]
+        coerced = [
+            float(item)
+            for item in value
+            if isinstance(item, (int, float)) and not isinstance(item, bool)
+        ]
         if len(coerced) > self.max_history:
             coerced = coerced[-self.max_history :]
         return coerced
