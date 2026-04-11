@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class ReplayEngine:
         self.steps = steps
 
     @classmethod
-    def from_price_files(cls, paths: list[str | Path]) -> "ReplayEngine":
+    def from_price_files(cls, paths: Sequence[str | Path]) -> ReplayEngine:
         grouped: dict[tuple[int, int], dict[str, dict[str, str]]] = defaultdict(dict)
 
         for path in paths:
@@ -38,4 +38,3 @@ class ReplayEngine:
 
     def iter_steps(self) -> Iterator[ReplayStep]:
         yield from self.steps
-

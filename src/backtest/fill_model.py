@@ -39,4 +39,3 @@ class FillModel:
             return filled
 
         return 0
-

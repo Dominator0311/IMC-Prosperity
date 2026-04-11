@@ -1,6 +1,5 @@
+# Runtime dependencies mirroring the Prosperity submission environment.
+# Keep this list minimal and in sync with what IMC allows in Trader.run().
 jsonpickle>=4.0
-matplotlib>=3.9
 numpy>=2.0
 pandas>=2.2
-pytest>=8.0
-

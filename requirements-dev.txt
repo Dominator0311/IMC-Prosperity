@@ -1,0 +1,11 @@
+# Development-only tooling. Not part of the Prosperity submission runtime.
+-r requirements.txt
+
+# Test
+pytest>=8.0
+pytest-cov>=5.0
+
+# Lint / format
+black>=24.8
+ruff>=0.6
+mypy>=1.11

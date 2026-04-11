@@ -1,3 +1,16 @@
+"""Shared engine types.
+
+These types are the stable vocabulary spoken by every engine layer:
+fair value, signals, execution, risk, and strategies.
+
+Design notes:
+- ``NormalizedSnapshot`` is frozen. Downstream code should not mutate it.
+- ``ProductMemory`` is mutable because it is the authoritative rolling state
+  we persist through ``traderData``; mutation is explicit and local.
+- ``FairValueEstimate`` and ``SignalIntent`` are frozen so strategy code
+  cannot accidentally mutate outputs of the fair value or signal stages.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -44,19 +57,20 @@ class NormalizedSnapshot:
 
     @property
     def mid(self) -> float | None:
-        if not self.best_bid or not self.best_ask:
+        if self.best_bid is None or self.best_ask is None:
             return None
         return (self.best_bid.price + self.best_ask.price) / 2.0
 
     @property
     def spread(self) -> float | None:
-        if not self.best_bid or not self.best_ask:
+        if self.best_bid is None or self.best_ask is None:
             return None
         return float(self.best_ask.price - self.best_bid.price)
 
     @property
     def book_imbalance(self) -> float | None:
-        if not self.best_bid or not self.best_ask:
+        """Top-of-book imbalance in [-1, 1], positive = bid-heavy."""
+        if self.best_bid is None or self.best_ask is None:
             return None
         total = self.best_bid.volume + self.best_ask.volume
         if total <= 0:
@@ -65,7 +79,8 @@ class NormalizedSnapshot:
 
     @property
     def microprice(self) -> float | None:
-        if not self.best_bid or not self.best_ask:
+        """Volume-weighted best price, i.e. mid tilted toward the thicker side."""
+        if self.best_bid is None or self.best_ask is None:
             return None
         total = self.best_bid.volume + self.best_ask.volume
         if total <= 0:
@@ -74,6 +89,24 @@ class NormalizedSnapshot:
             (self.best_bid.price * self.best_ask.volume)
             + (self.best_ask.price * self.best_bid.volume)
         ) / total
+
+    def total_bid_volume(self, depth: int | None = None) -> int:
+        levels = self.bids if depth is None else self.bids[:depth]
+        return sum(level.volume for level in levels)
+
+    def total_ask_volume(self, depth: int | None = None) -> int:
+        levels = self.asks if depth is None else self.asks[:depth]
+        return sum(level.volume for level in levels)
+
+    def top_bids(self, depth: int) -> tuple[BookLevel, ...]:
+        if depth <= 0:
+            return ()
+        return self.bids[:depth]
+
+    def top_asks(self, depth: int) -> tuple[BookLevel, ...]:
+        if depth <= 0:
+            return ()
+        return self.asks[:depth]
 
 
 @dataclass
@@ -91,9 +124,11 @@ class EngineState:
     products: dict[Product, ProductMemory] = field(default_factory=dict)
 
     def for_product(self, product: Product) -> ProductMemory:
-        if product not in self.products:
-            self.products[product] = ProductMemory()
-        return self.products[product]
+        memory = self.products.get(product)
+        if memory is None:
+            memory = ProductMemory()
+            self.products[product] = memory
+        return memory
 
 
 @dataclass(frozen=True)
@@ -122,4 +157,3 @@ class SignalIntent:
     quote: QuoteIntent | None = None
     rationale: str = ""
     metadata: dict[str, Scalar] = field(default_factory=dict)
-

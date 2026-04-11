@@ -12,4 +12,3 @@ def build_review_pack(metrics: RunMetrics) -> dict[str, object]:
         },
         "orders_by_product": dict(metrics.orders_by_product),
     }
-

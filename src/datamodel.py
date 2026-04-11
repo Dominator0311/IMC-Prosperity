@@ -1,3 +1,19 @@
+"""Local mirror of the Prosperity ``datamodel`` module.
+
+The IMC Prosperity runtime imports ``datamodel`` from the execution
+environment. This file mirrors that contract exactly so that locally
+developed code is type- and shape-compatible with the upload target.
+
+Rules:
+- Do not add strategy logic here.
+- Do not rename or retype fields without a matching change in the
+  submission packaging step.
+- Keep field names identical to the platform (``buy_orders``,
+  ``sell_orders``, ``order_depths``, etc.).
+- Sell orders on Prosperity use *negative* volumes by convention; we
+  preserve that convention here and normalize it in ``core.market_data``.
+"""
+
 from __future__ import annotations
 
 import json
@@ -33,9 +49,7 @@ class ConversionObservation:
 @dataclass
 class Observation:
     plainValueObservations: dict[Product, int] = field(default_factory=dict)
-    conversionObservations: dict[Product, ConversionObservation] = field(
-        default_factory=dict
-    )
+    conversionObservations: dict[Product, ConversionObservation] = field(default_factory=dict)
 
 
 @dataclass
@@ -78,9 +92,8 @@ class TradingState:
 
 class ProsperityEncoder(JSONEncoder):
     def default(self, value: Any) -> Any:
-        if is_dataclass(value):
+        if is_dataclass(value) and not isinstance(value, type):
             return asdict(value)
         if hasattr(value, "__dict__"):
             return value.__dict__
         return super().default(value)
-

@@ -19,4 +19,3 @@ class BaseStrategy(ABC):
     @abstractmethod
     def generate_intent(self, context: StrategyContext) -> SignalIntent:
         raise NotImplementedError
-

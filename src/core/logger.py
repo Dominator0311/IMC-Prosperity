@@ -18,4 +18,3 @@ class DecisionLogger:
         if len(payload) <= max_chars:
             return payload
         return payload[: max_chars - 3] + "..."
-

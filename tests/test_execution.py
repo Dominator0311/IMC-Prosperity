@@ -1,6 +1,12 @@
 from src.core.config import ProductConfig
 from src.core.execution import ExecutionEngine
-from src.core.types import BookLevel, FairValueEstimate, NormalizedSnapshot, QuoteIntent, SignalIntent
+from src.core.types import (
+    BookLevel,
+    FairValueEstimate,
+    NormalizedSnapshot,
+    QuoteIntent,
+    SignalIntent,
+)
 
 
 def test_execution_engine_generates_aggressive_and_passive_orders() -> None:
@@ -34,4 +40,3 @@ def test_execution_engine_generates_aggressive_and_passive_orders() -> None:
         (9997, 2),
         (10003, -2),
     ]
-

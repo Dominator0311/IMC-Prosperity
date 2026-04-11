@@ -17,4 +17,3 @@ class RunMetrics:
         self.order_count += len(orders)
         self.buy_order_count += sum(1 for order in orders if order.quantity > 0)
         self.sell_order_count += sum(1 for order in orders if order.quantity < 0)
-

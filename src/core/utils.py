@@ -19,5 +19,4 @@ def weighted_average(values: Sequence[float], weights: Sequence[float]) -> float
     total_weight = float(sum(weights))
     if total_weight == 0:
         raise ValueError("weights must not sum to zero")
-    return sum(value * weight for value, weight in zip(values, weights)) / total_weight
-
+    return sum(value * weight for value, weight in zip(values, weights, strict=True)) / total_weight

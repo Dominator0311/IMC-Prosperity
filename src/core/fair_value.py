@@ -65,4 +65,3 @@ class FairValueEngine:
             return FairValueEstimate(price=float(config.anchor_price), method="anchor_fallback")
 
         return FairValueEstimate(price=0.0, method="zero_fallback", confidence=0.0)
-

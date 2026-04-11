@@ -7,9 +7,7 @@ from src.strategies.base import BaseStrategy, StrategyContext
 
 
 class StableAnchorStrategy(BaseStrategy):
-    def __init__(
-        self, fair_value_engine: FairValueEngine, signal_engine: SignalEngine
-    ) -> None:
+    def __init__(self, fair_value_engine: FairValueEngine, signal_engine: SignalEngine) -> None:
         self.fair_value_engine = fair_value_engine
         self.signal_engine = signal_engine
 
@@ -20,4 +18,3 @@ class StableAnchorStrategy(BaseStrategy):
         return self.signal_engine.build_market_making_intent(
             context.product, context.snapshot, fair_value, context.config
         )
-

@@ -3,7 +3,13 @@ from __future__ import annotations
 import math
 
 from src.core.config import ProductConfig
-from src.core.types import FairValueEstimate, NormalizedSnapshot, QuoteIntent, SignalIntent
+from src.core.types import (
+    ExecutionMode,
+    FairValueEstimate,
+    NormalizedSnapshot,
+    QuoteIntent,
+    SignalIntent,
+)
 
 
 class SignalEngine:
@@ -14,9 +20,7 @@ class SignalEngine:
         fair_value: FairValueEstimate,
         config: ProductConfig,
     ) -> SignalIntent:
-        position_ratio = (
-            snapshot.position / config.position_limit if config.position_limit else 0.0
-        )
+        position_ratio = snapshot.position / config.position_limit if config.position_limit else 0.0
         skew = position_ratio * config.inventory_skew
         flattening = abs(position_ratio) >= config.flatten_threshold
 
@@ -33,7 +37,7 @@ class SignalEngine:
 
         bid_size = config.quote_size
         ask_size = config.quote_size
-        mode = "hybrid"
+        mode: ExecutionMode = "hybrid"
         rationale = "market_make_around_fair_value"
 
         if flattening:
@@ -67,4 +71,3 @@ class SignalEngine:
                 "flattening": flattening,
             },
         )
-
