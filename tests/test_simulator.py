@@ -12,12 +12,35 @@ from src.datamodel import Order, Trade, TradingState
 from src.trader import Trader
 
 
-class _ScriptedTrader:
-    """Test double that returns a pre-baked sequence of orders."""
+class _ScriptedLogger:
+    """Minimal stand-in for ``DecisionLogger`` so the scripted trader
+    can publish decision-time fair values into the simulator's
+    log-reading path without pulling in the full trader stack."""
 
-    def __init__(self, scripted: list[dict[str, list[Order]]]) -> None:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def record(self, event: dict[str, object]) -> None:
+        self.events.append(event)
+
+
+class _ScriptedTrader:
+    """Test double that returns a pre-baked sequence of orders.
+
+    When given a ``fair_values`` sequence the trader also publishes
+    decision-log events so the simulator can harvest decision-time
+    fair values from the same hook the real trader uses.
+    """
+
+    def __init__(
+        self,
+        scripted: list[dict[str, list[Order]]],
+        fair_values: list[dict[str, float]] | None = None,
+    ) -> None:
         self._scripted = scripted
+        self._fair_values = fair_values or []
         self._index = 0
+        self.logger = _ScriptedLogger()
         self.config = EngineConfig(
             products={
                 "P": ProductConfig(
@@ -31,6 +54,16 @@ class _ScriptedTrader:
 
     def run(self, state: TradingState) -> tuple[dict[str, list[Order]], int, str]:
         orders = self._scripted[self._index] if self._index < len(self._scripted) else {}
+        if self._index < len(self._fair_values):
+            for product, fair in self._fair_values[self._index].items():
+                self.logger.record(
+                    {
+                        "timestamp": state.timestamp,
+                        "product": product,
+                        "fair_value": float(fair),
+                        "method": "scripted",
+                    }
+                )
         self._index += 1
         return orders, 0, ""
 
@@ -97,7 +130,10 @@ def test_simulator_taker_buy_marks_to_market() -> None:
         ]
     )
     scripted = [{"P": [Order("P", 101, 2)]}, {"P": []}]
-    simulator = BacktestSimulator(trader=_ScriptedTrader(scripted))  # type: ignore[arg-type]
+    fair_values = [{"P": 100.0}, {"P": 104.0}]
+    simulator = BacktestSimulator(
+        trader=_ScriptedTrader(scripted, fair_values=fair_values)  # type: ignore[arg-type]
+    )
 
     result = simulator.run(replay)
     product = result.per_product["P"]
@@ -107,6 +143,32 @@ def test_simulator_taker_buy_marks_to_market() -> None:
     assert product.cash == pytest.approx(-202.0)
     # Last mid 104, position 2 -> +208, cash -202 -> pnl 6
     assert product.pnl == pytest.approx(6.0)
+
+    # Phase 4a: trade record + series are populated, taker's decision
+    # and fill timestamps coincide, and mids/pnl are gap-free.
+    assert len(result.trade_records) == 1
+    record = result.trade_records[0]
+    assert record.product == "P"
+    assert record.side == "buy"
+    assert record.mode == "taker"
+    assert record.decision_timestamp == 0
+    assert record.fill_timestamp == 0
+    assert record.fair_value_at_decision == pytest.approx(100.0)
+    assert record.mid_at_decision == pytest.approx(100.0)
+    assert record.mid_at_fill == pytest.approx(100.0)
+    assert result.mid_series["P"] == ((0, 100.0), (1, 104.0))
+    assert len(result.pnl_series["P"]) == 2
+    # At step 0 PnL uses the step mid (100) -> -202 + 2*100 = -2.
+    assert result.pnl_series["P"][0] == (0, pytest.approx(-2.0))
+    # Entry edge: buy at 101 vs fair 100 -> -1 per unit, quantity-weighted.
+    assert product.avg_entry_edge == pytest.approx(-1.0)
+    assert product.entry_edge_count == 1
+    # Markout 1: buy at 101 vs future mid 104 -> +3.
+    assert product.avg_markout_1 == pytest.approx(3.0)
+    assert product.markout_1_count == 1
+    # Horizons 5 and 20 can't reach past a 2-step replay.
+    assert product.markout_5_count == 0
+    assert product.markout_20_count == 0
 
 
 @pytest.mark.integration
@@ -198,3 +260,93 @@ def test_simulator_tracks_steps_near_position_limit() -> None:
     # Step 1: pos 5 -> 10 < 15.
     # Step 2: pos 10 -> 15 == 15 -> counted as near-limit.
     assert result.per_product["P"].steps_near_limit == 1
+
+
+@pytest.mark.integration
+def test_simulator_records_decision_context_for_maker_fills() -> None:
+    """Passive fills should carry the quoting step's fair value, not the
+    step that cleared them."""
+    replay = ReplayEngine(
+        [
+            _step(0, "P", 99, 5, 101, 5),
+            _step(
+                1,
+                "P",
+                99,
+                5,
+                101,
+                5,
+                market_trades={"P": [Trade("P", 99, 10, timestamp=1)]},
+            ),
+            _step(2, "P", 99, 5, 101, 5),
+        ]
+    )
+    scripted = [
+        {"P": [Order("P", 99, 4)]},  # quote at 99, fair=100 at step 0
+        {"P": []},
+        {"P": []},
+    ]
+    fair_values = [{"P": 100.0}, {"P": 95.0}, {"P": 100.0}]
+    simulator = BacktestSimulator(
+        trader=_ScriptedTrader(scripted, fair_values=fair_values),  # type: ignore[arg-type]
+        fill_model=FillModel(FillModelConfig(passive_allocation=0.5)),
+    )
+    result = simulator.run(replay)
+    # Expect one passive fill at step 1 from the pending quote created at step 0.
+    maker_records = [r for r in result.trade_records if r.mode == "maker"]
+    assert len(maker_records) == 1
+    record = maker_records[0]
+    assert record.decision_timestamp == 0
+    assert record.fill_timestamp == 1
+    assert record.decision_timestamp < record.fill_timestamp
+    # Decision fair value was 100 (step 0), NOT 95 (step 1 when it cleared).
+    assert record.fair_value_at_decision == pytest.approx(100.0)
+    # Entry edge uses the decision-time fair value: buy at 99 vs fair 100 -> +1.
+    assert result.per_product["P"].avg_entry_edge == pytest.approx(1.0)
+    assert result.per_product["P"].entry_edge_count == 1
+
+
+@pytest.mark.integration
+def test_simulator_pnl_series_gap_free_with_carry_forward_mid() -> None:
+    """PnL series must have an entry every step, even when the book is
+    one-sided and no new mid is observable."""
+    # Build a replay where step 1 has empty ask (one-sided book).
+    def _row_no_ask(timestamp: int) -> dict[str, str]:
+        return {
+            "day": "-1",
+            "timestamp": str(timestamp),
+            "product": "P",
+            "bid_price_1": "99",
+            "bid_volume_1": "5",
+            "bid_price_2": "",
+            "bid_volume_2": "",
+            "bid_price_3": "",
+            "bid_volume_3": "",
+            "ask_price_1": "",
+            "ask_volume_1": "",
+            "ask_price_2": "",
+            "ask_volume_2": "",
+            "ask_price_3": "",
+            "ask_volume_3": "",
+            "mid_price": "99",
+            "profit_and_loss": "0.0",
+        }
+
+    replay = ReplayEngine(
+        [
+            _step(0, "P", 99, 5, 101, 5),
+            ReplayStep(day=-1, timestamp=1, rows_by_product={"P": _row_no_ask(1)}),
+            _step(2, "P", 99, 5, 101, 5),
+        ]
+    )
+    scripted = [{"P": []}, {"P": []}, {"P": []}]
+    simulator = BacktestSimulator(trader=_ScriptedTrader(scripted))  # type: ignore[arg-type]
+    result = simulator.run(replay)
+
+    # mid_series only records steps with a two-sided book (two of three).
+    assert len(result.mid_series["P"]) == 2
+    # pnl_series records every step (three of three).
+    assert len(result.pnl_series["P"]) == 3
+    # Step 1 (one-sided) carried forward step 0's mid of 100.
+    assert result.pnl_series["P"][1][0] == 1  # timestamp
+    assert result.pnl_series["P"][1][1] == pytest.approx(0.0)  # position 0 -> pnl=cash=0

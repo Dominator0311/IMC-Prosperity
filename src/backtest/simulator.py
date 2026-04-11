@@ -17,8 +17,9 @@ Order lifecycle matches Prosperity semantics:
 - Partial residuals from a partially-taker-filled order are dropped
   because Prosperity cancels unfilled remainders at iteration end.
 
-Phase 2B scope keeps things focused: maker/taker counters and
-time-near-limit tracking. Markouts and charts land in Phase 4.
+Phase 4a adds per-trade records with decision and fill context,
+step-indexed time series for mids / fair values / PnL, and
+quantity-weighted aggregates (entry edge, markouts at +1/+5/+20).
 """
 
 from __future__ import annotations
@@ -27,13 +28,21 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from src.backtest.fill_model import Fill, FillModel
-from src.backtest.metrics import ProductResult, SimulationResult
+from src.backtest.metrics import (
+    ProductResult,
+    SimulationResult,
+    TimeSeries,
+    TradeRecord,
+    compute_entry_edges,
+    compute_markouts,
+)
 from src.backtest.replay_engine import ReplayEngine, ReplayStep
 from src.core.config import EngineConfig
 from src.datamodel import Order, OrderDepth, Trade, TradingState
 from src.trader import Trader
 
 _NEAR_LIMIT_FRACTION = 0.75
+MARKOUT_HORIZONS: tuple[int, ...] = (1, 5, 20)
 
 
 @dataclass
@@ -53,10 +62,28 @@ class _ProductAccounting:
     seen: bool = False
 
 
+@dataclass(frozen=True)
+class _DecisionContext:
+    """Frozen snapshot of what we believed when an order was sent."""
+
+    decision_timestamp: int
+    fair_value: float | None
+    fair_value_method: str | None
+    mid: float | None
+
+
+@dataclass(frozen=True)
+class _PendingMakerOrder:
+    """A resting maker order carrying its decision-time context forward."""
+
+    order: Order
+    decision: _DecisionContext
+
+
 @dataclass
 class _RunState:
     trader_data: str = ""
-    pending_maker: dict[str, list[Order]] = field(default_factory=dict)
+    pending_maker: dict[str, list[_PendingMakerOrder]] = field(default_factory=dict)
     recent_own_trades: dict[str, list[Trade]] = field(default_factory=dict)
 
 
@@ -75,6 +102,12 @@ class BacktestSimulator:
         limits = _position_limits(self.trader.config)
         step_count = 0
 
+        trade_records: list[TradeRecord] = []
+        mid_series: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        fair_value_series: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        pnl_series: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        last_seen_mid: dict[str, float] = {}
+
         for step in replay.iter_steps():
             step_count += 1
             state = self._build_state(step, run_state, books)
@@ -82,46 +115,128 @@ class BacktestSimulator:
             fills_this_step: dict[str, list[Fill]] = defaultdict(list)
 
             # --- passive phase: score last step's residuals against this step's trades
-            for product, orders in run_state.pending_maker.items():
-                if not orders:
+            for product, pending in run_state.pending_maker.items():
+                if not pending:
                     continue
                 product_trades = state.market_trades.get(product, [])
+                orders = [item.order for item in pending]
                 passive_fills = self.fill_model.score_passive_fills(
                     orders, product_trades, timestamp=step.timestamp
                 )
+                if not passive_fills:
+                    continue
+
+                # Map each resting price/side to its decision context so the
+                # passive-fill bookkeeping can look it up. Multiple pending
+                # orders on the same side at the same price collapse to the
+                # latest decision, which is a principled tiebreaker (we
+                # believed it most recently) and conservative when all
+                # pending orders share the same step anyway.
+                contexts: dict[int, _DecisionContext] = {}
+                for item in pending:
+                    key = _price_side_key(item.order.price, item.order.quantity)
+                    contexts[key] = item.decision
+
                 for fill in passive_fills:
                     self._apply_fill(books[product], fill)
                     fills_this_step[product].append(fill)
+                    context = _lookup_context(contexts, fill)
+                    mid_at_fill = _mid_from_depth(state.order_depths.get(product))
+                    trade_records.append(
+                        _build_trade_record(
+                            product=product,
+                            fill=fill,
+                            fill_timestamp=step.timestamp,
+                            decision=context,
+                            mid_at_fill=mid_at_fill,
+                        )
+                    )
 
             # --- trader call
+            if hasattr(self.trader, "logger") and hasattr(self.trader.logger, "events"):
+                self.trader.logger.events.clear()
             orders_by_product, _, run_state.trader_data = self.trader.run(state)
 
+            # --- pull decision-time context out of the trader log
+            decision_by_product = _collect_decision_contexts(
+                self.trader,
+                step_timestamp=step.timestamp,
+                order_depths=state.order_depths,
+            )
+
             # --- taker phase + residual handoff
-            next_pending: dict[str, list[Order]] = {}
+            next_pending: dict[str, list[_PendingMakerOrder]] = {}
             for product, product_orders in orders_by_product.items():
                 books[product].order_count += len(product_orders)
                 depth = state.order_depths.get(product)
                 if depth is None or not product_orders:
                     next_pending[product] = []
                     continue
+
+                decision_context = decision_by_product.get(
+                    product,
+                    _DecisionContext(
+                        decision_timestamp=step.timestamp,
+                        fair_value=None,
+                        fair_value_method=None,
+                        mid=_mid_from_depth(depth),
+                    ),
+                )
+
                 split = self.fill_model.split_taker_and_residual(
                     product_orders, depth, timestamp=step.timestamp
                 )
                 for fill in split.fills:
                     self._apply_fill(books[product], fill)
                     fills_this_step[product].append(fill)
-                next_pending[product] = split.pending_maker
+                    trade_records.append(
+                        _build_trade_record(
+                            product=product,
+                            fill=fill,
+                            fill_timestamp=step.timestamp,
+                            decision=decision_context,
+                            mid_at_fill=_mid_from_depth(depth),
+                        )
+                    )
+                next_pending[product] = [
+                    _PendingMakerOrder(order=order, decision=decision_context)
+                    for order in split.pending_maker
+                ]
 
-            # --- mark-to-market and near-limit tracking
+            # --- mark-to-market, series, and near-limit tracking
             for product, depth in state.order_depths.items():
                 accounting = books[product]
                 accounting.seen = True
                 mark = _mid_from_depth(depth)
                 if mark is not None:
                     accounting.mark_price = mark
+                    mid_series[product].append((step.timestamp, mark))
+                    last_seen_mid[product] = mark
                 limit = limits.get(product)
                 if limit and abs(accounting.position) >= _NEAR_LIMIT_FRACTION * limit:
                     accounting.steps_near_limit += 1
+
+            # Fair-value series from the decision log (always for every
+            # product the trader priced this step, including zero-order
+            # steps).
+            for product, context in decision_by_product.items():
+                if context.fair_value is not None:
+                    fair_value_series[product].append(
+                        (step.timestamp, context.fair_value)
+                    )
+
+            # PnL series: one entry per seen product per step, with
+            # carry-forward mid when the book is one-sided and no mark
+            # is available this step.
+            for product, accounting in books.items():
+                if not accounting.seen:
+                    continue
+                carry_mark = last_seen_mid.get(product)
+                if carry_mark is None:
+                    pnl = accounting.cash
+                else:
+                    pnl = accounting.cash + accounting.position * carry_mark
+                pnl_series[product].append((step.timestamp, pnl))
 
             run_state.pending_maker = next_pending
             run_state.recent_own_trades = {
@@ -129,7 +244,14 @@ class BacktestSimulator:
                 for product, fills in fills_this_step.items()
             }
 
-        return self._finalize(step_count, books)
+        return self._finalize(
+            step_count=step_count,
+            books=books,
+            trade_records=trade_records,
+            mid_series=mid_series,
+            fair_value_series=fair_value_series,
+            pnl_series=pnl_series,
+        )
 
     # ------------------------------------------------------------ helpers
 
@@ -168,7 +290,31 @@ class BacktestSimulator:
             accounting.maker_trade_quantity += quantity
 
     @staticmethod
-    def _finalize(steps: int, books: dict[str, _ProductAccounting]) -> SimulationResult:
+    def _finalize(
+        *,
+        step_count: int,
+        books: dict[str, _ProductAccounting],
+        trade_records: list[TradeRecord],
+        mid_series: dict[str, list[tuple[int, float]]],
+        fair_value_series: dict[str, list[tuple[int, float]]],
+        pnl_series: dict[str, list[tuple[int, float]]],
+    ) -> SimulationResult:
+        frozen_mid_series: dict[str, TimeSeries] = {
+            product: tuple(series) for product, series in mid_series.items()
+        }
+        frozen_fv_series: dict[str, TimeSeries] = {
+            product: tuple(series) for product, series in fair_value_series.items()
+        }
+        frozen_pnl_series: dict[str, TimeSeries] = {
+            product: tuple(series) for product, series in pnl_series.items()
+        }
+
+        records_tuple = tuple(trade_records)
+        edge_per_product = compute_entry_edges(records_tuple)
+        markouts_per_product = compute_markouts(
+            records_tuple, frozen_mid_series, MARKOUT_HORIZONS
+        )
+
         per_product: dict[str, ProductResult] = {}
         total_pnl = 0.0
         for product, acct in books.items():
@@ -177,6 +323,13 @@ class BacktestSimulator:
             mark = acct.mark_price or 0.0
             pnl = acct.cash + acct.position * mark
             total_pnl += pnl
+
+            edge_avg, edge_count = edge_per_product.get(product, (None, 0))
+            product_markouts = markouts_per_product.get(product, {})
+            mk1_avg, mk1_count = product_markouts.get(1, (None, 0))
+            mk5_avg, mk5_count = product_markouts.get(5, (None, 0))
+            mk20_avg, mk20_count = product_markouts.get(20, (None, 0))
+
             per_product[product] = ProductResult(
                 product=product,
                 pnl=pnl,
@@ -192,15 +345,125 @@ class BacktestSimulator:
                 buy_trade_quantity=acct.buy_trade_quantity,
                 sell_trade_quantity=acct.sell_trade_quantity,
                 steps_near_limit=acct.steps_near_limit,
+                avg_entry_edge=edge_avg,
+                entry_edge_count=edge_count,
+                avg_markout_1=mk1_avg,
+                markout_1_count=mk1_count,
+                avg_markout_5=mk5_avg,
+                markout_5_count=mk5_count,
+                avg_markout_20=mk20_avg,
+                markout_20_count=mk20_count,
             )
-        return SimulationResult(steps=steps, total_pnl=total_pnl, per_product=per_product)
+
+        return SimulationResult(
+            steps=step_count,
+            total_pnl=total_pnl,
+            per_product=per_product,
+            trade_records=records_tuple,
+            mid_series=frozen_mid_series,
+            fair_value_series=frozen_fv_series,
+            pnl_series=frozen_pnl_series,
+        )
 
 
-def _mid_from_depth(depth: OrderDepth) -> float | None:
-    if not depth.buy_orders or not depth.sell_orders:
+# ------------------------------------------------------------ free helpers
+
+
+def _mid_from_depth(depth: OrderDepth | None) -> float | None:
+    if depth is None or not depth.buy_orders or not depth.sell_orders:
         return None
     return (max(depth.buy_orders) + min(depth.sell_orders)) / 2.0
 
 
 def _position_limits(config: EngineConfig) -> dict[str, int]:
     return {product: cfg.position_limit for product, cfg in config.products.items()}
+
+
+def _collect_decision_contexts(
+    trader: Trader,
+    *,
+    step_timestamp: int,
+    order_depths: dict[str, OrderDepth],
+) -> dict[str, _DecisionContext]:
+    """Walk the trader's (per-step, freshly-cleared) decision log.
+
+    The simulator clears ``trader.logger.events`` immediately before
+    calling ``run``, so everything we see here was emitted during the
+    current step. We combine that with the step's visible mid so the
+    decision context captures both what the trader believed fair
+    value was *and* the observable book at the moment it decided.
+    """
+    contexts: dict[str, _DecisionContext] = {}
+    if not hasattr(trader, "logger") or not hasattr(trader.logger, "events"):
+        return contexts
+    for event in trader.logger.events:
+        product = event.get("product")
+        if not isinstance(product, str):
+            continue
+        fair_value = event.get("fair_value")
+        method = event.get("method")
+        contexts[product] = _DecisionContext(
+            decision_timestamp=step_timestamp,
+            fair_value=(
+                float(fair_value) if isinstance(fair_value, (int, float)) else None
+            ),
+            fair_value_method=method if isinstance(method, str) else None,
+            mid=_mid_from_depth(order_depths.get(product)),
+        )
+    return contexts
+
+
+def _price_side_key(price: int, signed_quantity: int) -> int:
+    """Pack (price, side) into a single int key.
+
+    We use the sign of the price: buy keys are positive, sell keys are
+    negative. Works because Prosperity prices are positive integers.
+    """
+    return price if signed_quantity > 0 else -price
+
+
+def _lookup_context(
+    contexts: dict[int, _DecisionContext], fill: Fill
+) -> _DecisionContext:
+    """Find the decision context that matches a passive fill's side."""
+    # If SELF is the buyer, we rested a buy at that price.
+    trade = fill.trade
+    sign = 1 if trade.buyer == "SELF" else -1
+    key = _price_side_key(int(trade.price), sign)
+    ctx = contexts.get(key)
+    if ctx is not None:
+        return ctx
+    # Defensive fallback: return a context with no decision data
+    # rather than raising. This should never hit in practice because
+    # the passive fill engine only credits orders we submitted.
+    return _DecisionContext(
+        decision_timestamp=trade.timestamp,
+        fair_value=None,
+        fair_value_method=None,
+        mid=None,
+    )
+
+
+def _build_trade_record(
+    *,
+    product: str,
+    fill: Fill,
+    fill_timestamp: int,
+    decision: _DecisionContext,
+    mid_at_fill: float | None,
+) -> TradeRecord:
+    trade = fill.trade
+    side = "buy" if trade.buyer == "SELF" else "sell"
+    return TradeRecord(
+        product=product,
+        side=side,
+        price=float(trade.price),
+        quantity=int(trade.quantity),
+        mode=fill.mode,
+        decision_timestamp=decision.decision_timestamp,
+        fill_timestamp=fill_timestamp,
+        fair_value_at_decision=decision.fair_value,
+        fair_value_method_at_decision=decision.fair_value_method,
+        mid_at_decision=decision.mid,
+        mid_at_fill=mid_at_fill,
+    )
