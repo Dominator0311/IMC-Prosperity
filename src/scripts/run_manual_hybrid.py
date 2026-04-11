@@ -39,7 +39,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.manual_rounds.artifacts import Artifacts, write_artifacts
+from src.manual_rounds.artifacts import Artifacts, build_manifest, write_artifacts
 from src.manual_rounds.hybrid_bid import (
     HybridResult,
     HybridScenario,
@@ -47,6 +47,9 @@ from src.manual_rounds.hybrid_bid import (
 )
 from src.manual_rounds.submission_note import SubmissionNote
 from src.scripts.run_manual_bid import _build_distribution, _build_grid
+
+RUNNER_NAME = "run_manual_hybrid"
+FAMILY = "hybrid_bid"
 
 
 def _result_to_dict(r: HybridResult) -> dict[str, Any]:
@@ -165,6 +168,11 @@ def run_from_input(input_path: Path, output_dir: Path) -> Path:
             assumptions=assumptions,
             sensitivity=sensitivity,
             submission_note=submission_note,
+            manifest=build_manifest(
+                runner_name=RUNNER_NAME,
+                family=FAMILY,
+                input_path=Path(input_path),
+            ),
         ),
     )
 

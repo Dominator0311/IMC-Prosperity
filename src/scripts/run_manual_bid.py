@@ -36,7 +36,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from src.manual_rounds.artifacts import Artifacts, write_artifacts
+from src.manual_rounds.artifacts import Artifacts, build_manifest, write_artifacts
 from src.manual_rounds.bid_optimizer import (
     BimodalUniformReserve,
     LinearRampReserve,
@@ -48,6 +48,9 @@ from src.manual_rounds.bid_optimizer import (
     optimize_two_bids,
 )
 from src.manual_rounds.submission_note import SubmissionNote
+
+RUNNER_NAME = "run_manual_bid"
+FAMILY = "bid"
 
 
 def _build_distribution(spec: dict[str, Any]) -> ReserveDistribution:
@@ -200,6 +203,11 @@ def run_from_input(input_path: Path, output_dir: Path) -> Path:
             assumptions=assumptions,
             sensitivity=sensitivity,
             submission_note=submission_note,
+            manifest=build_manifest(
+                runner_name=RUNNER_NAME,
+                family=FAMILY,
+                input_path=Path(input_path),
+            ),
         ),
     )
 

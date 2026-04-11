@@ -85,11 +85,61 @@ defense against second-guessing. Two to four sentences.
   control back to the operator.
 - **Always** run the solver through the CLI runner so artifacts are
   written to `outputs/manual_rounds/<run_id>/`. Do not print solver
-  output without also writing the standard 5-file pack.
-- **Always** flag if the round page mentions a mechanic the runner
-  doesn't model (second-pick fee tiers not in the input schema, bids
-  with fractional step sizes, reserve distributions that aren't one of
-  the three built-in shapes, etc.).
+  output without also writing the standard artifact pack.
+
+## THE OOD RULE (read this before every round)
+
+**If the round page mentions any mechanic the selected runner does not
+model, STOP. Do not force-fit the problem into a known family. Flag
+the mismatch and hand control back to the operator.**
+
+This rule overrides every other instruction in this brief. It is more
+important than speed, more important than "using the existing solvers",
+more important than producing an artifact pack. A runner that produces
+confident-looking artifacts for a problem it does not model is the
+single most dangerous failure mode of the whole manual-round
+workstream, because the output passes every shallow sanity check and
+reads as authoritative.
+
+### Concrete OOD signals per runner
+
+See `docs/manual_round_playbook.md`, section "Step 1b — Out-of-
+distribution check" for the full checklist. High-level examples:
+
+- **graph**: rates that change mid-round, per-edge fees, leg holds.
+- **bid**: >2 tiers, non-uniform/non-linear/non-bimodal reserves,
+  correlated reserves, resale value that depends on your bid.
+- **crowding**: dilution formula other than `C * M / (I + k * p)`,
+  per-cell fees, winner-take-all pots, information asymmetry.
+- **hybrid**: penalty that isn't `((V-mu)/(V-p_h))^alpha`, coupling
+  through median/max instead of average, multi-round dynamics.
+- **news**: L-infinity budget instead of L1, fee shape other than
+  `f*x^2`, correlated returns, non-integer positions.
+
+### What "flagging" looks like in your response
+
+When an OOD signal fires, your response must:
+
+1. Name the specific mechanic in the round page that does not fit.
+2. Quote the relevant phrase from the round page if possible.
+3. State which runner you would *otherwise* have used.
+4. Recommend a pen-and-paper or one-off-notebook approach instead.
+5. Produce **no** artifact pack — there is nothing to write that would
+   not mislead the operator.
+6. Output the 7-section structure with `chosen answer: DO NOT SUBMIT
+   WITHOUT OPERATOR REVIEW` in section 5, and the OOD finding in
+   section 3 (Assumptions) with a `(OOD MISMATCH)` flag.
+
+Do not apologise, do not hedge, do not offer a "best guess". If the
+mechanic doesn't fit, the correct output is a loud flag.
+
+### Failure mode you must resist
+
+The temptation under time pressure will be to say: "close enough, I'll
+use the runner anyway and note the mismatch in the submission note."
+This is wrong. A note buried in the markdown will be missed. The only
+acceptable response to an OOD signal is to stop the runner from
+producing artifacts at all.
 
 ## Round-day checklist
 

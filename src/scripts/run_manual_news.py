@@ -33,10 +33,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.manual_rounds.artifacts import Artifacts, write_artifacts
+from src.manual_rounds.artifacts import Artifacts, build_manifest, write_artifacts
 from src.manual_rounds.news_portfolio import NewsPayoff, Product, solve
 from src.manual_rounds.sensitivity import run_news_sensitivity
 from src.manual_rounds.submission_note import SubmissionNote
+
+RUNNER_NAME = "run_manual_news"
+FAMILY = "news_portfolio"
 
 
 def run_from_input(input_path: Path, output_dir: Path) -> Path:
@@ -173,6 +176,11 @@ def run_from_input(input_path: Path, output_dir: Path) -> Path:
             assumptions=assumptions,
             sensitivity=sensitivity.to_json(),
             submission_note=submission_note,
+            manifest=build_manifest(
+                runner_name=RUNNER_NAME,
+                family=FAMILY,
+                input_path=Path(input_path),
+            ),
         ),
     )
 

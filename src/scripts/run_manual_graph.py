@@ -34,10 +34,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.manual_rounds.artifacts import Artifacts, write_artifacts
+from src.manual_rounds.artifacts import Artifacts, build_manifest, write_artifacts
 from src.manual_rounds.graph_arbitrage import Path as GraphPath
 from src.manual_rounds.graph_arbitrage import RateMatrix, best_path
 from src.manual_rounds.submission_note import SubmissionNote
+
+RUNNER_NAME = "run_manual_graph"
+FAMILY = "graph"
 
 
 def _path_to_dict(path: GraphPath) -> dict[str, Any]:
@@ -134,6 +137,11 @@ def run_from_input(input_path: Path, output_dir: Path) -> Path:
             assumptions=assumptions,
             sensitivity=sensitivity,
             submission_note=submission_note,
+            manifest=build_manifest(
+                runner_name=RUNNER_NAME,
+                family=FAMILY,
+                input_path=Path(input_path),
+            ),
         ),
     )
 

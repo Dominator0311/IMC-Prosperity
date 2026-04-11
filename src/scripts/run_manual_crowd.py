@@ -35,10 +35,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.manual_rounds.artifacts import Artifacts, write_artifacts
+from src.manual_rounds.artifacts import Artifacts, build_manifest, write_artifacts
 from src.manual_rounds.nash_crowd import Bundle, CrowdCell, CrowdPayoff, solve
 from src.manual_rounds.sensitivity import run_crowd_sensitivity
 from src.manual_rounds.submission_note import SubmissionNote
+
+RUNNER_NAME = "run_manual_crowd"
+FAMILY = "crowding"
 
 
 def _bundle_to_dict(bundle: Bundle) -> dict[str, Any]:
@@ -181,6 +184,11 @@ def run_from_input(input_path: Path, output_dir: Path) -> Path:
             assumptions=assumptions,
             sensitivity=sensitivity.to_json(),
             submission_note=submission_note,
+            manifest=build_manifest(
+                runner_name=RUNNER_NAME,
+                family=FAMILY,
+                input_path=Path(input_path),
+            ),
         ),
     )
 

@@ -26,10 +26,13 @@ import pytest
 from src.manual_rounds.artifacts import (
     ANSWER_FILENAME,
     ARTIFACT_FILENAMES,
+    MANIFEST_FILENAME,
     read_artifacts,
 )
+from src.scripts.run_manual_bid import run_from_input as run_bid
 from src.scripts.run_manual_crowd import run_from_input as run_crowd
 from src.scripts.run_manual_graph import run_from_input as run_graph
+from src.scripts.run_manual_hybrid import run_from_input as run_hybrid
 from src.scripts.run_manual_news import run_from_input as run_news
 
 
@@ -37,6 +40,39 @@ def _write_input(tmp_path: Path, filename: str, payload: dict[str, object]) -> P
     path = tmp_path / filename
     path.write_text(json.dumps(payload))
     return path
+
+
+def _assert_manifest_shape(
+    manifest: dict[str, object] | None,
+    expected_runner: str,
+    expected_family: str,
+    expected_input_path: Path,
+) -> None:
+    """Every runner must stamp an auditable manifest.json.
+
+    Required keys: runner_name, family, input_path, timestamp,
+    schema_version. git_commit and git_dirty may be None when running
+    outside a git checkout; they must still be present as keys.
+    """
+    assert manifest is not None, "manifest.json is missing"
+    for key in (
+        "runner_name",
+        "family",
+        "input_path",
+        "timestamp",
+        "schema_version",
+        "git_commit",
+        "git_dirty",
+    ):
+        assert key in manifest, f"manifest missing required key {key!r}"
+    assert manifest["runner_name"] == expected_runner
+    assert manifest["family"] == expected_family
+    # input_path is stored absolute; compare against resolved.
+    assert Path(str(manifest["input_path"])) == expected_input_path.resolve()
+    # Timestamp must parse as ISO 8601 with Z suffix.
+    ts = str(manifest["timestamp"])
+    assert ts.endswith("Z") and "T" in ts, f"bad timestamp {ts!r}"
+    assert isinstance(manifest["schema_version"], int)
 
 
 @pytest.mark.integration
@@ -100,6 +136,15 @@ def test_graph_runner_writes_full_artifact_pack(tmp_path: Path) -> None:
     assert "base" in artifacts["sensitivity"]
     assert "robust" in artifacts["sensitivity"]
 
+    # Manifest is present and well-formed.
+    assert (output_dir / MANIFEST_FILENAME).exists()
+    _assert_manifest_shape(
+        artifacts["manifest"],
+        expected_runner="run_manual_graph",
+        expected_family="graph",
+        expected_input_path=input_path,
+    )
+
 
 @pytest.mark.integration
 def test_crowd_runner_produces_base_and_robust(tmp_path: Path) -> None:
@@ -160,6 +205,13 @@ def test_crowd_runner_produces_base_and_robust(tmp_path: Path) -> None:
     assert assumptions["base_treasure"] == 10000
     assert assumptions["max_picks"] == 2
     assert len(assumptions["cells"]) == 10
+
+    _assert_manifest_shape(
+        artifacts["manifest"],
+        expected_runner="run_manual_crowd",
+        expected_family="crowding",
+        expected_input_path=input_path,
+    )
 
 
 @pytest.mark.integration
@@ -223,3 +275,169 @@ def test_news_runner_reports_sensitivity_and_robust(tmp_path: Path) -> None:
         "Biggest failure mode",
     ):
         assert section in note
+
+    _assert_manifest_shape(
+        read_artifacts(output_dir)["manifest"],
+        expected_runner="run_manual_news",
+        expected_family="news_portfolio",
+        expected_input_path=input_path,
+    )
+
+
+@pytest.mark.integration
+def test_bid_runner_reproduces_p2_r1_goldfish(tmp_path: Path) -> None:
+    # Prosperity 2 Round 1: linear reserve on [900, 1000], resale 1000,
+    # two bids. Canonical EV-optimal answer = (952, 978).
+    input_path = _write_input(
+        tmp_path,
+        "round1_goldfish.json",
+        {
+            "round": "P2-R1",
+            "distribution": {"type": "linear_ramp", "low": 900, "high": 1000},
+            "resale_value": 1000,
+            "bid_grid": {"start": 900, "stop": 1001, "step": 1},
+            "n_bids": 2,
+            "top_k": 10,
+        },
+    )
+    output_dir = tmp_path / "bid_out"
+    returned = run_bid(input_path, output_dir)
+    assert returned == output_dir
+
+    for name in ARTIFACT_FILENAMES:
+        assert (output_dir / name).exists(), f"missing {name}"
+
+    artifacts = read_artifacts(output_dir)
+    answer = artifacts["answer"]
+    assert answer["family"] == "bid"
+    assert answer["round"] == "P2-R1"
+    chosen = answer["chosen"]
+    assert chosen["low_bid"] == 952
+    assert chosen["high_bid"] == 978
+    assert chosen["expected_pnl_per_unit"] > 0
+
+    # Top alternatives must be sorted descending by EV and include the
+    # chosen pair as the head.
+    top = artifacts["top_alternatives"]["alternatives"]
+    assert len(top) >= 2
+    assert (top[0]["low_bid"], top[0]["high_bid"]) == (952, 978)
+    for i in range(len(top) - 1):
+        assert top[i]["expected_pnl_per_unit"] >= top[i + 1]["expected_pnl_per_unit"]
+
+    # Assumptions echo the raw input so the operator can typo-diff.
+    assumptions = artifacts["assumptions"]
+    assert assumptions["distribution"]["type"] == "linear_ramp"
+    assert assumptions["resale_value"] == 1000
+    assert assumptions["n_bids"] == 2
+
+    # Sensitivity block is trivial for single-agent bidding but must
+    # still contain base/robust.
+    sensitivity = artifacts["sensitivity"]
+    assert "base" in sensitivity
+    assert "robust" in sensitivity
+
+    # Submission note is fully populated.
+    note = artifacts["submission_note_md"]
+    for section in (
+        "Problem family",
+        "Chosen answer",
+        "Payoff structure",
+        "Core assumptions",
+        "Biggest failure mode",
+    ):
+        assert section in note
+    assert "952" in note and "978" in note
+
+    _assert_manifest_shape(
+        artifacts["manifest"],
+        expected_runner="run_manual_bid",
+        expected_family="bid",
+        expected_input_path=input_path,
+    )
+
+
+@pytest.mark.integration
+def test_hybrid_runner_reproduces_p3_r3_flippers(tmp_path: Path) -> None:
+    # Prosperity 3 Round 3: bimodal reserve on [160,200] and [250,320],
+    # resale 320, cubic penalty (alpha=3), mu forecast in the 280-300
+    # band. Worst-case-robust optimum should sit with low ~200 and
+    # high in the 285-305 region.
+    input_path = _write_input(
+        tmp_path,
+        "round3_flippers.json",
+        {
+            "round": "P3-R3",
+            "distribution": {
+                "type": "bimodal",
+                "low_a": 160,
+                "high_a": 200,
+                "low_b": 250,
+                "high_b": 320,
+                "mass_low": 0.5,
+            },
+            "resale_value": 320,
+            "bid_grid": {"start": 160, "stop": 321, "step": 1},
+            "alpha": 3.0,
+            "mu_scenarios": {
+                "base": 287,
+                "optimistic": 280,
+                "pessimistic": 295,
+            },
+            "top_k": 10,
+        },
+    )
+    output_dir = tmp_path / "hybrid_out"
+    returned = run_hybrid(input_path, output_dir)
+    assert returned == output_dir
+
+    for name in ARTIFACT_FILENAMES:
+        assert (output_dir / name).exists(), f"missing {name}"
+
+    artifacts = read_artifacts(output_dir)
+    answer = artifacts["answer"]
+    assert answer["family"] == "hybrid_bid"
+    chosen = answer["chosen"]
+    # Low bid should land near the top of the lower reserve mode.
+    assert 195 <= chosen["low_bid"] <= 200
+    # High bid sits in the robust 285-310 band (worst-case over mu
+    # scenarios), above the individual single-agent optimum of ~284.
+    assert 285 <= chosen["high_bid"] <= 310
+
+    # Expected PnL must be reported per scenario and the worst-case
+    # must be <= each scenario PnL.
+    ev_by_scenario = chosen["expected_pnl_by_scenario"]
+    assert set(ev_by_scenario.keys()) == {"base", "optimistic", "pessimistic"}
+    worst = chosen["worst_case_pnl"]
+    for pnl in ev_by_scenario.values():
+        assert pnl >= worst - 1e-9
+
+    # Top alternatives sorted descending by worst-case PnL.
+    top = artifacts["top_alternatives"]["alternatives"]
+    assert len(top) >= 2
+    for i in range(len(top) - 1):
+        assert top[i]["worst_case_pnl"] >= top[i + 1]["worst_case_pnl"]
+
+    # Sensitivity block documents every mu scenario.
+    sensitivity = artifacts["sensitivity"]
+    assert set(sensitivity["scenarios"].keys()) == {"base", "optimistic", "pessimistic"}
+    for label in ("base", "optimistic", "pessimistic"):
+        assert sensitivity["scenarios"][label]["alpha"] == 3.0
+
+    # Submission note has every checklist section.
+    note = artifacts["submission_note_md"]
+    for section in (
+        "Problem family",
+        "Chosen answer",
+        "Payoff structure",
+        "Core assumptions",
+        "Robustness range",
+        "Biggest failure mode",
+    ):
+        assert section in note
+
+    _assert_manifest_shape(
+        artifacts["manifest"],
+        expected_runner="run_manual_hybrid",
+        expected_family="hybrid_bid",
+        expected_input_path=input_path,
+    )

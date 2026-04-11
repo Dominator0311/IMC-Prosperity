@@ -34,6 +34,85 @@ If the puzzle looks hybrid, pick the *dominant* family first. If it
 looks like something new, fall back to pen and paper — do not force-fit
 an existing runner.
 
+## Step 1b — Out-of-distribution check (MANDATORY, non-negotiable)
+
+Before you write the input JSON, scan the round page for any mechanic
+the runner you picked does **not** model. If you find even one, **stop
+and flag the mismatch rather than force-fitting it**.
+
+The runners were built for the exact shape each family took in
+Prosperity 1–3. Prosperity 4 may tweak the mechanics in ways that
+break the assumptions silently. A silent misfit in a solver that
+"runs fine" is the most dangerous failure mode in a manual round: the
+artifacts look plausible, the submission note looks clean, and the
+answer is wrong.
+
+### Runner-specific OOD signals
+
+**graph (`run_manual_graph`):**
+- Non-deterministic rates, or rates that shift mid-round.
+- Edge-dependent fees (a fixed cost per trade that is not just a
+  multiplicative factor).
+- Max-hops that depends on *which* edges are used, not just how many.
+- Asymmetric start/end nodes where a subset of currencies is banned at
+  specific positions in the path.
+- Any leg that requires holding for multiple iterations.
+
+**bid (`run_manual_bid`):**
+- More than two tiers of bid (e.g. a three-tier sealed bid).
+- A reserve distribution that is not uniform, linear-ramp, or
+  bimodal-uniform (e.g. triangular, gaussian, explicitly sampled).
+- Correlated reserves across counterparties.
+- Fractional bids, or bids outside the integer grid.
+- A resale value that depends on the bid (e.g. "sells for 10x your bid").
+- Any form of partial fill or quantity splitting.
+
+**crowding (`run_manual_crowd`):**
+- Fees that tier on something other than pick count (e.g. per-cell
+  fees, tiered by total multiplier sum).
+- Payoff dilution that uses a formula other than
+  `C * M / (I + k * p)` (e.g. winner-take-all, log-scaled, or a
+  capped pot).
+- Inhabitants or multipliers that change during the round.
+- A max_picks value greater than 3 (the enumeration is still fine, but
+  verify fees are well-defined).
+- Shared pots across multiple cells.
+- Any form of information asymmetry between teams.
+
+**hybrid_bid (`run_manual_hybrid`):**
+- Penalty forms that are not `((V - mu) / (V - p_h)) ** alpha`
+  (e.g. piecewise, absolute-value-based, floor-capped).
+- Coupling through something other than the average of other teams'
+  high bids (e.g. median, max, quantile).
+- Multi-round dynamics where `mu` evolves with your own prior answers.
+- A low-bid leg that is also coupled to other teams' bids.
+
+**news_portfolio (`run_manual_news`):**
+- An L-infinity budget instead of L1 (cap per position, not total).
+- A fee that is not `f * x^2` (e.g. linear, cubic, or asymmetric
+  between long and short).
+- Correlated returns across products (e.g. a factor structure).
+- Products that interact (e.g. buying X reduces the return on Y).
+- Position bounds that are asymmetric between long and short.
+- Any non-integer position size.
+
+### What "flagging the mismatch" looks like
+
+If you find a signal from the lists above:
+
+1. **Do not run the runner.** The artifacts it produces will be wrong
+   and misleadingly official-looking.
+2. Write a short note to yourself naming the exact mechanic that
+   doesn't fit, under `outputs/manual_rounds/round_N_OOD.md`.
+3. Solve the round with pen and paper, or write a one-off notebook
+   that models the specific mechanic.
+4. If you end up using a runner anyway because the OOD signal turned
+   out to be cosmetic, **document why** in the OOD note so future-you
+   has an audit trail.
+
+The 60 seconds you spend on this check is the cheapest insurance the
+toolkit has.
+
 ## Step 2 — Write the input JSON
 
 Each runner takes a single JSON file. Copy the worked example from
