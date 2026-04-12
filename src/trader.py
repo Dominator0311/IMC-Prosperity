@@ -36,6 +36,7 @@ from src.core.state_store import StateStore
 from src.core.types import EngineState, NormalizedSnapshot, ProductMemory
 from src.core.utils import bounded_append
 from src.datamodel import Order, TradingState
+from src.signals.flow_analyzer import FlowAnalyzer
 from src.strategies import STRATEGY_REGISTRY
 from src.strategies.base import BaseStrategy, StrategyContext
 
@@ -59,6 +60,7 @@ class Trader:
         self.signal_engine = SignalEngine()
         self.execution_engine = ExecutionEngine()
         self.risk_manager = RiskManager()
+        self.flow_analyzer = FlowAnalyzer(self.config.scanner_config)
         self.logger = DecisionLogger()
         self._reraise_exceptions = reraise_exceptions
         self.strategies: dict[str, BaseStrategy] = self._build_strategies()
@@ -148,6 +150,9 @@ class Trader:
         strategy: BaseStrategy,
         timestamp: int,
     ) -> list[Order]:
+        # Observational flow scan — never alters strategy behaviour.
+        flow_report = self.flow_analyzer.scan(snapshot, memory)
+
         context = StrategyContext(
             product=product,
             snapshot=snapshot,
@@ -163,17 +168,29 @@ class Trader:
             limit=product_config.position_limit,
         )
 
-        self.logger.record(
-            {
-                "timestamp": timestamp,
-                "product": product,
-                "fair_value": round(intent.fair_value.price, 4),
-                "method": intent.fair_value.method,
-                "position": snapshot.position,
-                "mode": intent.mode,
-                "orders": [(order.price, order.quantity) for order in legal_orders],
-            }
-        )
+        event: dict[str, object] = {
+            "timestamp": timestamp,
+            "product": product,
+            "fair_value": round(intent.fair_value.price, 4),
+            "method": intent.fair_value.method,
+            "position": snapshot.position,
+            "mode": intent.mode,
+            "orders": [(order.price, order.quantity) for order in legal_orders],
+        }
+        if flow_report is not None:
+            verbosity = self.config.scanner_config.verbosity
+            if verbosity >= 2:
+                event["flow_report"] = {
+                    "net_flow": flow_report.net_flow,
+                    "flow_score": flow_report.flow_score,
+                    "near_high": flow_report.near_high,
+                    "near_low": flow_report.near_low,
+                    "flags": list(flow_report.flags),
+                    "repeated_sizes": dict(flow_report.repeated_sizes),
+                }
+            elif verbosity >= 1:
+                event["scan_flags"] = list(flow_report.flags)
+        self.logger.record(event)
         return legal_orders
 
     @staticmethod

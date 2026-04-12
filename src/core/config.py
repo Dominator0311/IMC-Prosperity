@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.core.types import ScannerConfig
+
 KNOWN_STRATEGY_NAMES: tuple[str, ...] = ("market_making",)
 KNOWN_ESTIMATOR_NAMES: tuple[str, ...] = (
     "anchor",
@@ -121,6 +123,7 @@ class EngineConfig:
     max_trader_data_chars: int = 50_000
     diagnostics_verbosity: int = 1
     products: dict[str, ProductConfig] = field(default_factory=dict)
+    scanner_config: ScannerConfig = field(default_factory=ScannerConfig)
 
     def __post_init__(self) -> None:
         if self.state_version < 1:

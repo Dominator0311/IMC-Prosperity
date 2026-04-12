@@ -166,3 +166,50 @@ class SignalIntent:
     quote: QuoteIntent | None = None
     rationale: str = ""
     metadata: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)
+
+
+# ---------------------------------------------------------------- scanner
+
+
+@dataclass(frozen=True)
+class ScannerConfig:
+    """Controls whether and how verbosely the flow scanner runs.
+
+    Verbosity levels:
+    - 0 (default): silent — scanner runs and persists state but adds
+      nothing to the decision logger. Suitable for live submission.
+    - 1: flags-only — appends ``scan_flags`` to the logger event.
+    - 2: full report — appends the complete ``FlowReport`` dict to the
+      logger event. Intended for offline review scripts only.
+    """
+
+    enabled: bool = True
+    extrema_window: int = 20
+    extrema_tolerance: float = 1.0
+    flow_decay: float = 0.8
+    repeated_size_threshold: int = 3
+    verbosity: int = 0
+
+
+@dataclass(frozen=True)
+class FlowReport:
+    """Observational summary of trade-flow patterns for a single step.
+
+    All fields are ephemeral — only ``flow_score`` (via
+    ``ProductMemory.values``) and ``step_count`` (via
+    ``ProductMemory.counters``) are persisted across calls.
+
+    ``net_flow`` is a heuristic proxy for directional pressure, not
+    true aggressor-side inference. The sign convention is: buyer-only
+    trade -> +qty, seller-only -> -qty, both or neither -> 0.
+    """
+
+    product: Product
+    timestamp: Timestamp
+    repeated_sizes: Mapping[int, int]
+    net_flow: int
+    flow_score: float
+    near_high: bool
+    near_low: bool
+    flags: tuple[str, ...]
+    metadata: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)
