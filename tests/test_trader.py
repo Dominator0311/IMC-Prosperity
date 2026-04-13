@@ -169,3 +169,31 @@ def test_trader_crash_barrier_reraises_in_test_mode() -> None:
     )
     with pytest.raises(RuntimeError, match="intentional explosion"):
         trader.run(state)
+
+
+@pytest.mark.integration
+def test_trader_tomatoes_wall_mid_default_produces_orders() -> None:
+    """Regression guard: promoted TOMATOES default (wall_mid) runs and trades.
+
+    After optimization pass 1, TOMATOES fair_value_method was promoted
+    from weighted_mid to wall_mid.  This test verifies the default config
+    path works end-to-end with the new estimator.
+    """
+    trader = Trader()
+    state = _state(
+        {
+            "TOMATOES": OrderDepth(
+                buy_orders={4995: 10, 4993: 20},
+                sell_orders={5005: -10, 5007: -20},
+            )
+        },
+        position={"TOMATOES": 0},
+    )
+
+    orders, conversions, trader_data = trader.run(state)
+
+    assert "TOMATOES" in orders
+    assert len(orders["TOMATOES"]) > 0
+    assert conversions == 0
+    assert isinstance(trader_data, str)
+    json.loads(trader_data)  # must be valid JSON

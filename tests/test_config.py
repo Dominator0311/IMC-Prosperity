@@ -26,7 +26,7 @@ def test_default_engine_config_contains_emeralds_and_tomatoes() -> None:
     assert "TOMATOES" in config.products
     assert config.products["EMERALDS"].fair_value_method == "anchor"
     assert config.products["EMERALDS"].anchor_price == 10_000.0
-    assert config.products["TOMATOES"].fair_value_method == "weighted_mid"
+    assert config.products["TOMATOES"].fair_value_method == "wall_mid"
     assert config.products["TOMATOES"].fair_value_fallbacks == ("mid", "microprice")
     assert config.products["TOMATOES"].maker_edge == 1.0
     assert config.products["TOMATOES"].taker_edge == 1.0
