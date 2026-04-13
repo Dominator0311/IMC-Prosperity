@@ -35,6 +35,7 @@ class SweepRow:
     maker_share: float | None
     final_position: int
     steps_near_limit: int
+    avg_entry_edge: float | None = None
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,7 @@ class ParameterSweepReport:
     def summary_text(self, *, top_n: int = 10) -> str:
         header = (
             f"{'maker':>5} {'taker':>5} {'skew':>5} {'flat':>5} "
-            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4}"
+            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4} {'edge':>8}"
         )
         lines = [
             f"Parameter sweep: {self.product}",
@@ -193,6 +194,7 @@ def _simulate_row(
         maker_share=_maker_share(product_result),
         final_position=product_result.final_position,
         steps_near_limit=product_result.steps_near_limit,
+        avg_entry_edge=product_result.avg_entry_edge,
     )
 
 
@@ -230,10 +232,11 @@ def _row_line(row: SweepRow) -> str:
     skew = row.params.get("inventory_skew", "n/a")
     flatten = row.params.get("flatten_threshold", "n/a")
     maker_share = f"{row.maker_share * 100:.1f}" if row.maker_share is not None else "n/a"
+    edge = f"{row.avg_entry_edge:+.3f}" if row.avg_entry_edge is not None else "    n/a"
     return (
         f"{maker:>5} {taker:>5} {skew:>5} {flatten:>5} "
         f"{row.pnl:>10.2f} {row.trade_count:>7d} {maker_share:>6} "
-        f"{row.steps_near_limit:>5d} {row.final_position:>4d}"
+        f"{row.steps_near_limit:>5d} {row.final_position:>4d} {edge:>8}"
     )
 
 

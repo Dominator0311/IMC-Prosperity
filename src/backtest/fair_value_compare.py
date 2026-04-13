@@ -57,6 +57,9 @@ class EstimatorComparison:
     maker_share: float | None
     final_position: int
     steps_near_limit: int
+    mean_diff_vs_primary: float | None = None
+    mean_diff_vs_mid: float | None = None
+    value_change_frequency: float | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,21 @@ class ProductFairValueComparison:
             "delta_n1 compares estimator next-step MAE against the current-mid baseline "
             f"({ _fmt(self.baseline_next_mid_mae) })"
         )
+        # Distinctness diagnostics
+        lines.append("")
+        lines.append("Distinctness diagnostics")
+        d_header = f"{'estimator':<18} {'d_primary':>10} {'d_mid':>10} {'chg%':>7}"
+        lines.append(d_header)
+        lines.append("-" * len(d_header))
+        for row in self.comparisons:
+            d_pri = _fmt(row.mean_diff_vs_primary)
+            d_mid = _fmt(row.mean_diff_vs_mid)
+            chg = (
+                f"{row.value_change_frequency * 100:.1f}"
+                if row.value_change_frequency is not None
+                else "n/a"
+            )
+            lines.append(f"{row.estimator:<18} {d_pri:>10} {d_mid:>10} {chg:>7}")
         return "\n".join(lines)
 
 
@@ -318,6 +336,32 @@ def _compare_estimator(
     )
 
     next_mid_mae = _mean(next_mid_errors)
+
+    # Distinctness diagnostics
+    primary_name = product_config.fair_value_method
+    diff_vs_primary_vals: list[float] = []
+    diff_vs_mid_vals: list[float] = []
+    prev_est: float | None = None
+    change_count = 0
+    pair_count = 0
+
+    for record in records:
+        est = record.estimates.get(estimator_name)
+        if est is not None:
+            primary_est = record.estimates.get(primary_name)
+            if primary_est is not None:
+                diff_vs_primary_vals.append(abs(est - primary_est))
+            mid_est = record.estimates.get("mid")
+            if mid_est is not None:
+                diff_vs_mid_vals.append(abs(est - mid_est))
+            if prev_est is not None:
+                pair_count += 1
+                if abs(est - prev_est) > 0:
+                    change_count += 1
+            prev_est = est
+        else:
+            prev_est = None
+
     return EstimatorComparison(
         estimator=estimator_name,
         samples=samples,
@@ -335,6 +379,9 @@ def _compare_estimator(
         maker_share=maker_share,
         final_position=replay_result.final_position,
         steps_near_limit=replay_result.steps_near_limit,
+        mean_diff_vs_primary=_mean(diff_vs_primary_vals),
+        mean_diff_vs_mid=_mean(diff_vs_mid_vals),
+        value_change_frequency=change_count / pair_count if pair_count > 0 else None,
     )
 
 
