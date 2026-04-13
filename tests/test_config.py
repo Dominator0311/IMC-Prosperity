@@ -30,7 +30,7 @@ def test_default_engine_config_contains_emeralds_and_tomatoes() -> None:
     assert config.products["TOMATOES"].fair_value_fallbacks == ("mid", "microprice")
     assert config.products["TOMATOES"].maker_edge == 1.0
     assert config.products["TOMATOES"].taker_edge == 1.0
-    assert config.products["TOMATOES"].inventory_skew == 3.0
+    assert config.products["TOMATOES"].inventory_skew == 12.0
 
 
 @pytest.mark.unit

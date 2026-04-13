@@ -53,7 +53,7 @@ def test_trader_runs_smoke_path_for_emeralds() -> None:
 @pytest.mark.integration
 def test_trader_respects_position_limit_for_aggressive_buys() -> None:
     trader = Trader()
-    # EMERALDS limit is 20 in default config; current position is 18.
+    # EMERALDS limit is 80 in default config; current position is 78.
     # Strategy will want to buy below 10000 anchor; risk must clip the buy
     # side aggregate to 2.
     state = _state(
@@ -63,7 +63,7 @@ def test_trader_respects_position_limit_for_aggressive_buys() -> None:
                 sell_orders={9995: -5, 9996: -5},
             )
         },
-        position={"EMERALDS": 18},
+        position={"EMERALDS": 78},
     )
 
     orders, _, _ = trader.run(state)

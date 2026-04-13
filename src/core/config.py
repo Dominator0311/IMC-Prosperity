@@ -145,7 +145,7 @@ def default_engine_config() -> EngineConfig:
     return EngineConfig(
         products={
             "EMERALDS": ProductConfig(
-                position_limit=20,
+                position_limit=80,
                 strategy_name="market_making",
                 fair_value_method="anchor",
                 fair_value_fallbacks=("microprice", "mid"),
@@ -154,12 +154,12 @@ def default_engine_config() -> EngineConfig:
                 maker_edge=2.0,
                 quote_size=5,
                 max_aggressive_size=10,
-                inventory_skew=2.0,
+                inventory_skew=8.0,
                 flatten_threshold=0.75,
                 history_length=32,
             ),
             "TOMATOES": ProductConfig(
-                position_limit=20,
+                position_limit=80,
                 strategy_name="market_making",
                 fair_value_method="weighted_mid",
                 fair_value_fallbacks=("mid", "microprice"),
@@ -167,7 +167,7 @@ def default_engine_config() -> EngineConfig:
                 maker_edge=1.0,
                 quote_size=4,
                 max_aggressive_size=8,
-                inventory_skew=3.0,
+                inventory_skew=12.0,
                 flatten_threshold=0.7,
                 history_length=48,
             ),
