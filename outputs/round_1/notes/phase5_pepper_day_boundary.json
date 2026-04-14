@@ -43,7 +43,7 @@
     "flatten_overlay_total_delta": -1121.0,
     "label": "pepper_c1b_linear_drift_h32_t20_f07",
     "overall_pnl": 54015.0,
-    "pack": "outputs/round_1/review_packs/20260414T140409Z_round1_pepper_c1b_linear_drift_h32_t20_f07",
+    "pack": "outputs/round_1/review_packs/20260414T140923Z_round1_pepper_c1b_linear_drift_h32_t20_f07",
     "per_day": {
       "-2": {
         "pnl_at_end_of_day": 20574.5,
@@ -78,7 +78,7 @@
     "flatten_overlay_total_delta": -1275.5,
     "label": "pepper_c2_linear_drift_h32_skew1_f09",
     "overall_pnl": 78844.0,
-    "pack": "outputs/round_1/review_packs/20260414T140415Z_round1_pepper_c2_linear_drift_h32_skew1_f09",
+    "pack": "outputs/round_1/review_packs/20260414T140931Z_round1_pepper_c2_linear_drift_h32_skew1_f09",
     "per_day": {
       "-2": {
         "pnl_at_end_of_day": 32422.5,

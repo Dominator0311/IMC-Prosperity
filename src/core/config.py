@@ -198,11 +198,14 @@ def default_engine_config() -> EngineConfig:
                 history_length=48,
             ),
             # INTARIAN_PEPPER_ROOT: deterministic drift +0.1 per
-            # timestamp step with a +1 000 overnight jump. Fair value
-            # is tracked by the `linear_drift` estimator (added in
-            # Phase 3) with a book-aware fallback chain for warm-up
-            # and one-sided snapshots. See
-            # outputs/round_1/research/intarian_pepper_root_dossier.md.
+            # timestamp step; the drift runs *continuously* across day
+            # boundaries on the sample data, so the daily mean rises
+            # ~1 000 per day (the Phase-2 "+1 000 overnight jump"
+            # framing was a misread — see the dossier corrigendum
+            # under outputs/round_1/research/intarian_pepper_root_dossier.md).
+            # Fair value is tracked by the `linear_drift` estimator
+            # (added in Phase 3) with a book-aware fallback chain for
+            # warm-up and one-sided snapshots.
             #
             # Fallback-chain design note: this product has no
             # `anchor_price`, so the `FairValueEngine.estimate`

@@ -22,7 +22,7 @@
 | Product | Dominant structure | Best placeholder FV | Alt | Likely execution style |
 |---------|-------------------|---------------------|-----|------------------------|
 | ASH_COATED_OSMIUM | Stable anchor ≈ 10 000, wide spread (median 16), tight oscillation (σ(mid) 4–5) | `wall_mid` (most cross-day robust; PnL 2.6k / 3.4k / 2.6k) | `weighted_mid`, `rolling_mid` (very similar), `ewma_mid` / `depth_mid` for best markouts | Maker-first, spread capture |
-| INTARIAN_PEPPER_ROOT | Deterministic drift +0.1 / step; overnight +1 000 jump; σ around line ≈ 1.2 | `depth_mid` (PnL 40 428 combined; top-2 every day) | `hybrid_wall_micro` (best markouts, zero near-limit); `ewma_mid` (cross-day stable) | Taker-first / mixed; lagging FVs lose |
+| INTARIAN_PEPPER_ROOT | Deterministic drift +0.1 / step (continuous across day boundaries; daily *mean* rises +1 000 because the drift runs the whole day — the original "overnight +1 000 jump" framing was a misread, see Phase-5 correction); σ around line ≈ 1.2 | `depth_mid` (PnL 40 428 combined; top-2 every day) | `hybrid_wall_micro` (best markouts, zero near-limit); `ewma_mid` (cross-day stable) | Taker-first / mixed; lagging FVs lose |
 
 ## Acceptance criteria (plan)
 

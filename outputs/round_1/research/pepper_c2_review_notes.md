@@ -44,8 +44,9 @@ later capitulation to inventory.
   it does not break it.
 - **EOD positions are all long on every day**, same as C1, with
   slightly larger swings (+37 on day 0 vs +34). Because PEPPER mids
-  are continuous across days, those carry-ins earn drift PnL on the
-  next day rather than paying an overnight shock.
+  are **continuous across day boundaries** on the sample data (no
+  overnight jump — see the dossier corrigendum), those carry-ins just
+  keep earning drift PnL into the next day.
 
 ## What the review pack shows — what's the cost?
 

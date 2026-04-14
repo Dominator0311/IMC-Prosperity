@@ -5,7 +5,7 @@ For each PEPPER shortlist candidate, walks the review pack's
 
 1. What is the **end-of-day position** on each day?
 2. How much PnL accrues in the **last K steps** of each day (the
-   "overnight-exposed" slice)?
+   tail-of-day slice)?
 3. What would PnL look like under a **hypothetical
    flatten-before-boundary overlay** — force the book flat at a
    chosen per-day cutoff step, using the last observed mid as the
@@ -15,6 +15,14 @@ For each PEPPER shortlist candidate, walks the review pack's
 
 This is a **post-hoc** analysis; it never re-runs the simulator. It
 reads the packs written by ``run_round1_review_packs.py``.
+
+NOTE: The Phase-2 plan originally framed this script as detecting a
+"+1 000 overnight jump" in PEPPER. That framing was a misread — the
+PEPPER mid is continuous across day boundaries in the sample data
+(the daily *mean* +1 000 comes from intraday drift running through
+the close). See the dossier corrigendum. The script still produces
+the correct diagnostics; only the reason for looking at them
+changed.
 
 Usage::
 
@@ -378,8 +386,12 @@ def main() -> None:
     lines.append("## Interpretation guide")
     lines.append("")
     lines.append(
-        "- **EOD position**: large absolute values exposed to the +1 000 overnight jump. "
-        "Sign matters: long before a jump earns the +1 000, short before a jump loses 1 000 per unit."
+        "- **EOD position**: signed end-of-day inventory. The Phase-2 "
+        "plan framed this as exposure to a +1 000 overnight jump; "
+        "Phase 5 confirmed **PEPPER mids are continuous across day "
+        "boundaries** on the sample data (no jump). EOD position only "
+        "matters if the drift pauses or reverses intraday. See the "
+        "dossier corrigendum."
     )
     lines.append(
         "- **Tail PnL**: PnL accrued in the last tail-steps window of each day. "

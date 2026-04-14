@@ -42,12 +42,15 @@ without an `anchor_price`.
    (fills that require aggressive taker priority which the official
    fill model may not grant). C2 is the natural fallback if C1's
    edge is fill-assumption-heavy.
-4. **PEPPER day-boundary behaviour** — what happens on the +1 000
-   overnight jump? Specifically, end-of-day positions, sign of
-   position right before the jump, and PnL-per-day-transition impact.
-   This also lets us decide whether adding a **flatten-before-boundary
-   policy** (force flat on the last N steps of each day) would help
-   or hurt.
+4. **PEPPER day-boundary behaviour** — what happens across day
+   transitions? (Phase 2 framed this as a "+1 000 overnight jump";
+   the Phase-5 analysis of the first pack revealed that is a misread
+   — see the dossier corrigendum. The question still stands: we need
+   to look at end-of-day positions, per-day-transition PnL impact,
+   and whether a **flatten-before-boundary policy** would help or
+   hurt. The answer from Phase 5 turned out to be: no jump exists
+   and flatten-before-boundary *costs* PnL. The plan below has been
+   executed against the corrected framing.)
 
 ### Questions Phase 5 must NOT re-open
 
@@ -81,8 +84,9 @@ Per the plan, Phase 5 produces:
    - inventory behaviour
 2. **A PEPPER day-boundary analysis** — a focused script that reports:
    - EOD position for each candidate on each day
-   - per-day-transition PnL delta (attributable to overnight jump vs
-     intraday trading)
+   - tail-of-day PnL accrual and per-day-transition behaviour
+     (originally framed as "overnight jump vs intraday trading";
+     Phase-5 confirmed there is no overnight jump — see corrigendum)
    - expected PnL of a hypothetical flatten-before-boundary overlay
      applied after the fact to each candidate
    Target file: `src/scripts/round_1/run_round1_day_boundary_check.py`.

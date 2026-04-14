@@ -88,10 +88,12 @@ INTARIAN_PEPPER_ROOT per-day
   (edge +3.05; mk_5 +3.50).
 - **Cross-day PnL is NOT stable**: +24 864 on day -2, only +385 on
   day -1, and **-4 174 on day 0**. The warm-up for `linear_drift`
-  across the first ~48 samples of each day is part of this: each day
-  the slope estimator has to re-learn from scratch because the rolling
-  memory carried across the overnight +1 000 jump is actively
-  misleading until it is flushed out.
+  across the first ~48 samples of each day is part of this.
+  (Original text invoked a "+1 000 overnight jump" here; Phase 5
+  confirmed the PEPPER mid is **continuous** across day boundaries —
+  the warm-up effect is driven by the new-day's mid history being
+  short, not by a discontinuous transition. See the dossier
+  corrigendum and `outputs/round_1/notes/phase5_pepper_day_boundary.md`.)
 - **Final positions are large and signed:** -11, -22, +34. The
   near-limit count on day -2 (2 714 steps, ~30 %) shows the book gets
   stuck against the limit early in a strongly-trending day. This is
@@ -123,9 +125,10 @@ INTARIAN_PEPPER_ROOT per-day
 1. **INTARIAN_PEPPER_ROOT cross-day stability is the #1 priority.**
    Day 0 PnL is negative under the placeholder config despite strong
    entry edge and markouts, so the problem is clearly sizing /
-   inventory / overnight handling — not signal quality. Stage C in
+   inventory / memory warm-up — not signal quality. Stage C in
    Phase 4 is the right place for this; Stage A/B should not ignore
-   it.
+   it. (Original text said "overnight handling"; Phase 5 confirmed
+   there is no overnight jump — see corrigendum.)
 2. **ASH_COATED_OSMIUM is close to reasonable already.** Stage A
    should explore whether giving up some taker aggression in favour
    of inside-touch maker quotes increases markout quality or final

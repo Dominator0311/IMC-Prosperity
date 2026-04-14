@@ -15,7 +15,7 @@ Flatten overlay cutoff: step 9800 of 100
 
 ## Interpretation guide
 
-- **EOD position**: large absolute values exposed to the +1 000 overnight jump. Sign matters: long before a jump earns the +1 000, short before a jump loses 1 000 per unit.
+- **EOD position**: signed end-of-day inventory. The Phase-2 plan framed this as exposure to a +1 000 overnight jump; Phase 5 confirmed **PEPPER mids are continuous across day boundaries** on the sample data (no jump). EOD position only matters if the drift pauses or reverses intraday. See the dossier corrigendum.
 - **Tail PnL**: PnL accrued in the last tail-steps window of each day. Big negatives suggest adverse selection near close; big positives (and especially if they add up to most of the day's PnL) suggest the strategy makes most of its money riding the drift into close.
 - **Lag-1 autocorr of step PnL**: near 0 = uncorrelated (steady); strongly positive = clustered (PnL arrives in bursts); negative = mean-reverting bar-by-bar.
 - **Overlay total delta**: signed PnL impact if we'd flattened at the cutoff step using the mid at that moment. Positive means a pre-close flatten would have helped; negative means it would have cost us.
@@ -32,7 +32,7 @@ Pack: `outputs/round_1/review_packs/20260414T140404Z_round1_pepper_c1_linear_dri
 | 0 | 34 | +56300.0 | 278 | 4 | +872.0 | -703.0 |
 
 ### pepper_c1b_linear_drift_h32_t20_f07
-Pack: `outputs/round_1/review_packs/20260414T140409Z_round1_pepper_c1b_linear_drift_h32_t20_f07`
+Pack: `outputs/round_1/review_packs/20260414T140923Z_round1_pepper_c1b_linear_drift_h32_t20_f07`
 
 | Day | EOD pos | EOD cum PnL | Trades | Tail trades | Tail PnL | Overlay delta |
 |-----|---------|-------------|--------|-------------|----------|---------------|
@@ -41,7 +41,7 @@ Pack: `outputs/round_1/review_packs/20260414T140409Z_round1_pepper_c1b_linear_dr
 | 0 | 29 | +54015.0 | 275 | 4 | +772.0 | -610.5 |
 
 ### pepper_c2_linear_drift_h32_skew1_f09
-Pack: `outputs/round_1/review_packs/20260414T140415Z_round1_pepper_c2_linear_drift_h32_skew1_f09`
+Pack: `outputs/round_1/review_packs/20260414T140931Z_round1_pepper_c2_linear_drift_h32_skew1_f09`
 
 | Day | EOD pos | EOD cum PnL | Trades | Tail trades | Tail PnL | Overlay delta |
 |-----|---------|-------------|--------|-------------|----------|---------------|

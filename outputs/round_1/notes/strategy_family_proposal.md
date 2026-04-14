@@ -6,17 +6,30 @@ Phase 3) and nothing is tuned (Phase 4). The goal is to lock in the
 family, the primary fair value, the execution style, and the risks
 **before** writing code.
 
+> **Corrigendum (Phase 5).** Several sections below frame PEPPER as
+> having a **"+1 000 overnight jump"** and argue for flatten-before-
+> boundary / EOD mitigation on that basis. That framing was wrong —
+> PEPPER mids are **continuous across day boundaries** on the sample
+> data, and the daily *mean* +1 000 increment comes from the +0.1-
+> per-step intraday drift running through the close. The trend-fair-
+> taker strategy family itself stands (it's exactly what the drift
+> rewards), but the overnight-jump risk reasoning here is
+> **invalidated**. See the dossier corrigendum and
+> `outputs/round_1/notes/phase5_pepper_day_boundary.md`. The
+> hypothetical flatten-before-boundary overlay in fact *costs* PnL on
+> every candidate.
+
 ## Cross-product summary
 
 | Dimension                  | ASH_COATED_OSMIUM                         | INTARIAN_PEPPER_ROOT                              |
 |----------------------------|-------------------------------------------|---------------------------------------------------|
-| Structure (Phase 1)        | Anchored at ~10 000, σ(mid) 4–5, median spread **16** | Deterministic drift +0.1 / timestamp step, overnight +1 000 jump, σ around line ≈ 1.2 |
+| Structure (Phase 1)        | Anchored at ~10 000, σ(mid) 4–5, median spread **16** | Deterministic drift +0.1 / timestamp step, continuous across day boundaries (daily *mean* rises +1 000; see corrigendum), σ around line ≈ 1.2 |
 | Strategy family            | Stable-anchor wide-spread market maker    | Trend-fair taker with small maker overlay         |
 | Primary fair value         | `wall_mid` (primary), `depth_mid` (alternate in Phase 4) | **new** `linear_drift` estimator (primary), `depth_mid` (strong fallback)    |
 | Fallback chain (initial)   | `(mid, microprice)`                       | `(depth_mid, hybrid_wall_micro, mid)`             |
 | Execution style            | Maker-first (inside-touch two-sided quotes with inventory skew) | Taker-first (residual-triggered crosses), small maker overlay when residual shrinks |
 | Take logic                 | Take only when residual > `taker_edge` (≥ 1 tick beyond FV) | Take ask when `best_ask − fair < −taker_edge`; take bid when `best_bid − fair > taker_edge`; with a drift estimator this should fire more cleanly than on ASH |
-| Inventory posture          | Moderate skew, moderate flatten threshold, avoid pinning at limit | Tight skew, aggressive flatten near EOD to avoid the +1 000 overnight jump |
+| Inventory posture          | Moderate skew, moderate flatten threshold, avoid pinning at limit | Tight skew; Phase 5 confirmed no EOD flatten is needed (no overnight jump — corrigendum) |
 | Phase-1 PnL intuition      | `wall_mid` 8.8k combined (placeholder limit=50)                   | `depth_mid` 40k combined; lagging FVs post −8k to −67k               |
 
 ## ASH_COATED_OSMIUM

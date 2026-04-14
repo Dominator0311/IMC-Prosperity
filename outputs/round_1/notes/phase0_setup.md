@@ -118,16 +118,19 @@ Observations:
 |  0  | 12 500.96 | 288.18 | 11998.5–13000.5 | 1002 | 14.13 | 14 |
 
 Observations:
-- Daily mean increments by almost exactly **+1 000** per day
-  (10 500 → 11 500 → 12 500).
+- Daily *mean* increments by almost exactly **+1 000** per day
+  (10 500 → 11 500 → 12 500). [**Phase-5 correction:** this is from a
+  +0.1-per-step intraday drift that runs *continuously* across day
+  boundaries; it is **not** an overnight discontinuity. The mid path
+  is continuous — day -2 closes at ≈11 001, day -1 opens at ≈10 998.
+  See the dossier corrigendum.]
 - Per-day **range ≈ 1 000** and **σ ≈ 288**; σ·√12 ≈ 998 ≈ range, i.e.
   price is roughly uniformly distributed across the day's band rather
   than executing a clean single-slope linear drift.
 - Spread widens slightly each day (12 → 13 → 14).
 - Leading hypothesis ("trend-fair with local reversion") needs
   refinement: **within-day**, the signal may be local mean reversion
-  around a shifting daily center; **between days**, the center steps by
-  +1 000. Dossier will quantify both.
+  around the drift line. Dossier will quantify.
 
 ### Trade tape
 

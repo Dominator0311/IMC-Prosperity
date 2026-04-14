@@ -4,13 +4,31 @@
 data (`day_-2`, `day_-1`, `day_0`; 30 000 snapshots, 27 688 two-sided).
 No strategy has been implemented.
 
+> **Corrigendum (Phase 5).** This dossier repeatedly describes an
+> **"overnight +1 000 jump"** between consecutive days. That framing
+> was a misread. The daily *mean* mid rises by +1 000 per day because
+> the +0.1-per-step intraday drift continues *across* day boundaries —
+> day -2 closes at mid ≈ 11 001, day -1 opens at mid ≈ 10 998
+> (Δ ≈ −3 ticks); day -1 closes at ≈ 11 998, day 0 opens at ≈ 11 998
+> (Δ ≈ 0). The mid path is **continuous**, not discontinuous, on the
+> sample data. Any reasoning in this dossier that depends on a
+> discontinuous transition (overnight flatten to dodge a jump,
+> inventory-sign risk at day close, etc.) is **invalidated**. The
+> drift magnitude and per-day linear fit are still correct; only the
+> day-to-day transition interpretation changes. See
+> `outputs/round_1/notes/phase5_review_shortlist.md` and
+> `outputs/round_1/notes/phase5_pepper_day_boundary.md` for the
+> corrected analysis.
+
 ## TL;DR
 
 - Leading hypothesis ("trend-fair with local reversion") is
   **supported and sharper than expected**: the mid follows an almost
   deterministic drift of **+0.1 ticks per timestamp step** (1 000
-  ticks per 10 000-step day) on **every** day, with an **overnight
-  jump of exactly +1 000 ticks** between consecutive days.
+  ticks per 10 000-step day), and the drift **continues across day
+  boundaries** — so the daily mean is +1 000 higher each day but the
+  mid path is continuous (see corrigendum above; the original draft
+  said "overnight jump of +1 000 ticks", which was wrong).
 - σ of mid around that linear fit is only **~1.1–1.3 ticks** — the
   price sits on the drift with a tight ~±1-tick noise envelope.
 - In the Phase-1 replay (placeholder limit=50), **lagging
