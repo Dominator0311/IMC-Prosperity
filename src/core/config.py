@@ -259,3 +259,119 @@ def round1_engine_config() -> EngineConfig:
         scanner_config=base.scanner_config,
         residual_config=base.residual_config,
     )
+
+
+# Phase-6 upload variants. Each is a thin wrapper that overrides the
+# per-product fair-value / edge / inventory parameters on top of the
+# round-1 baseline. The three variants together are the Phase-6 upload
+# shortlist (see ``docs/round_1/upload_plan.md``).
+
+
+def _round1_engine_with(**per_product_overrides: dict[str, object]) -> EngineConfig:
+    """Helper: apply per-product field overrides on top of round1_engine_config."""
+    from dataclasses import replace
+
+    base = round1_engine_config()
+    products = dict(base.products)
+    for product, overrides in per_product_overrides.items():
+        current = base.product_config(product)
+        if current is None:
+            continue
+        products[product] = replace(current, **overrides)
+    return EngineConfig(
+        state_version=base.state_version,
+        max_trader_data_chars=base.max_trader_data_chars,
+        diagnostics_verbosity=base.diagnostics_verbosity,
+        products=products,
+        scanner_config=base.scanner_config,
+        residual_config=base.residual_config,
+    )
+
+
+def round1_baseline_engine_config() -> EngineConfig:
+    """Phase-6 upload **baseline / control** variant.
+
+    Uses the Phase-3 minimum-viable Round-1 product defaults verbatim.
+    This is the reference point for the official-upload comparison:
+    every subsequent variant should outperform it.
+
+    - ASH_COATED_OSMIUM: wall_mid, maker=1.0, taker=1.0, skew=4.0,
+      flatten=0.7, history=48.
+    - INTARIAN_PEPPER_ROOT: linear_drift, maker=1.5, taker=1.0,
+      skew=2.0, flatten=0.8, history=48.
+    """
+    return round1_engine_config()
+
+
+def round1_promoted_engine_config() -> EngineConfig:
+    """Phase-6 upload **promoted / robust default** variant.
+
+    Pair of Phase-5 winners:
+
+    - ASH_COATED_OSMIUM = C-ASH-A: ewma_mid, maker=1.0, taker=0.25,
+      skew=4.0, flatten=0.7, history=48. Promoted over wall_mid for
+      its tighter cross-day PnL variance, better markouts at every
+      horizon, and zero near-limit steps.
+    - INTARIAN_PEPPER_ROOT = C-PEP-A (C1b): linear_drift, maker=1.0,
+      taker=2.0, skew=2.0, flatten=0.7, history=32. Same signal
+      quality as C1 with 57 % less limit pinning.
+
+    See ``outputs/round_1/notes/phase5_review_shortlist.md``.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            fair_value_method="ewma_mid",
+            fair_value_fallbacks=("mid", "microprice"),
+            maker_edge=1.0,
+            taker_edge=0.25,
+            inventory_skew=4.0,
+            flatten_threshold=0.7,
+            history_length=48,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            maker_edge=1.0,
+            taker_edge=2.0,
+            inventory_skew=2.0,
+            flatten_threshold=0.7,
+            history_length=32,
+        ),
+    )
+
+
+def round1_alt_engine_config() -> EngineConfig:
+    """Phase-6 upload **higher-upside alternate** variant.
+
+    Pair of Phase-5 higher-upside candidates:
+
+    - ASH_COATED_OSMIUM = C-ASH-B: wall_mid, maker=1.5, taker=0.5,
+      skew=4.0, flatten=0.7, history=48. ~20 % more local PnL than
+      C-ASH-A; depends more on the local fill model.
+    - INTARIAN_PEPPER_ROOT = C-PEP-B: linear_drift, maker=1.0,
+      taker=2.0, skew=1.0, flatten=0.9, history=32. Directional bet
+      on drift persistence; ~40 % more PnL than C-PEP-A at 4x the
+      near-limit exposure.
+
+    See ``outputs/round_1/notes/phase5_review_shortlist.md``.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            fair_value_method="wall_mid",
+            fair_value_fallbacks=("mid", "microprice"),
+            maker_edge=1.5,
+            taker_edge=0.5,
+            inventory_skew=4.0,
+            flatten_threshold=0.7,
+            history_length=48,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            maker_edge=1.0,
+            taker_edge=2.0,
+            inventory_skew=1.0,
+            flatten_threshold=0.9,
+            history_length=32,
+        ),
+    )

@@ -11,9 +11,14 @@ import pytest
 from src.core.config import (
     KNOWN_ESTIMATOR_NAMES,
     KNOWN_STRATEGY_NAMES,
+    ROUND1_PRODUCTS,
     EngineConfig,
     ProductConfig,
     default_engine_config,
+    round1_alt_engine_config,
+    round1_baseline_engine_config,
+    round1_engine_config,
+    round1_promoted_engine_config,
 )
 from src.core.fair_value import ESTIMATORS
 from src.strategies import STRATEGY_REGISTRY
@@ -173,3 +178,66 @@ def test_engine_config_validates_state_version_and_budget() -> None:
         EngineConfig(state_version=0)
     with pytest.raises(ValueError):
         EngineConfig(max_trader_data_chars=0)
+
+
+@pytest.mark.unit
+def test_round1_engine_config_contains_only_round1_products() -> None:
+    config = round1_engine_config()
+    assert set(config.products) == set(ROUND1_PRODUCTS)
+    # Tutorial products should be absent.
+    assert "EMERALDS" not in config.products
+    assert "TOMATOES" not in config.products
+
+
+@pytest.mark.unit
+def test_round1_baseline_is_the_round1_default() -> None:
+    baseline = round1_baseline_engine_config()
+    reference = round1_engine_config()
+    # Baseline must equal the round-1 default verbatim: this is the
+    # Phase-3 MVB reference point.
+    for product in ROUND1_PRODUCTS:
+        assert baseline.product_config(product) == reference.product_config(product)
+
+
+@pytest.mark.unit
+def test_round1_promoted_uses_phase5_parameters() -> None:
+    """C-ASH-A (ewma_mid, t=0.25) + C-PEP-A (linear_drift, t=2.0, flat=0.7)."""
+    promoted = round1_promoted_engine_config()
+    ash = promoted.product_config("ASH_COATED_OSMIUM")
+    pepper = promoted.product_config("INTARIAN_PEPPER_ROOT")
+    assert ash is not None and pepper is not None
+    assert ash.fair_value_method == "ewma_mid"
+    assert ash.taker_edge == 0.25
+    assert ash.maker_edge == 1.0
+    assert pepper.fair_value_method == "linear_drift"
+    assert pepper.taker_edge == 2.0
+    assert pepper.inventory_skew == 2.0
+    assert pepper.flatten_threshold == 0.7
+    assert pepper.history_length == 32
+
+
+@pytest.mark.unit
+def test_round1_alt_uses_phase5_higher_upside_parameters() -> None:
+    """C-ASH-B (wall_mid, t=0.5) + C-PEP-B (linear_drift, skew=1.0, flat=0.9)."""
+    alt = round1_alt_engine_config()
+    ash = alt.product_config("ASH_COATED_OSMIUM")
+    pepper = alt.product_config("INTARIAN_PEPPER_ROOT")
+    assert ash is not None and pepper is not None
+    assert ash.fair_value_method == "wall_mid"
+    assert ash.taker_edge == 0.5
+    assert ash.maker_edge == 1.5
+    assert pepper.fair_value_method == "linear_drift"
+    assert pepper.inventory_skew == 1.0
+    assert pepper.flatten_threshold == 0.9
+    assert pepper.history_length == 32
+
+
+@pytest.mark.unit
+def test_round1_variants_only_contain_round1_products() -> None:
+    """All three Phase-6 variants must contain exactly the round-1 products."""
+    for variant in (
+        round1_baseline_engine_config(),
+        round1_promoted_engine_config(),
+        round1_alt_engine_config(),
+    ):
+        assert set(variant.products) == set(ROUND1_PRODUCTS)
