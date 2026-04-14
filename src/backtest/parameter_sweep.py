@@ -36,6 +36,9 @@ class SweepRow:
     final_position: int
     steps_near_limit: int
     avg_entry_edge: float | None = None
+    avg_markout_1: float | None = None
+    avg_markout_5: float | None = None
+    avg_markout_20: float | None = None
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,8 @@ class ParameterSweepReport:
     def summary_text(self, *, top_n: int = 10) -> str:
         header = (
             f"{'maker':>5} {'taker':>5} {'skew':>5} {'flat':>5} "
-            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4} {'edge':>8}"
+            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4} "
+            f"{'edge':>8} {'mk_1':>7} {'mk_5':>7} {'mk_20':>7}"
         )
         lines = [
             f"Parameter sweep: {self.product}",
@@ -195,6 +199,9 @@ def _simulate_row(
         final_position=product_result.final_position,
         steps_near_limit=product_result.steps_near_limit,
         avg_entry_edge=product_result.avg_entry_edge,
+        avg_markout_1=product_result.avg_markout_1,
+        avg_markout_5=product_result.avg_markout_5,
+        avg_markout_20=product_result.avg_markout_20,
     )
 
 
@@ -233,10 +240,14 @@ def _row_line(row: SweepRow) -> str:
     flatten = row.params.get("flatten_threshold", "n/a")
     maker_share = f"{row.maker_share * 100:.1f}" if row.maker_share is not None else "n/a"
     edge = f"{row.avg_entry_edge:+.3f}" if row.avg_entry_edge is not None else "    n/a"
+    mk_1 = f"{row.avg_markout_1:+.2f}" if row.avg_markout_1 is not None else "   n/a"
+    mk_5 = f"{row.avg_markout_5:+.2f}" if row.avg_markout_5 is not None else "   n/a"
+    mk_20 = f"{row.avg_markout_20:+.2f}" if row.avg_markout_20 is not None else "   n/a"
     return (
         f"{maker:>5} {taker:>5} {skew:>5} {flatten:>5} "
         f"{row.pnl:>10.2f} {row.trade_count:>7d} {maker_share:>6} "
-        f"{row.steps_near_limit:>5d} {row.final_position:>4d} {edge:>8}"
+        f"{row.steps_near_limit:>5d} {row.final_position:>4d} {edge:>8} "
+        f"{mk_1:>7} {mk_5:>7} {mk_20:>7}"
     )
 
 
