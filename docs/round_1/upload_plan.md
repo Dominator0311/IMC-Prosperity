@@ -142,6 +142,47 @@ PYTHONPATH=. .venv/bin/python -m src.scripts.validate_submission \
 # expected: 0 errors, 1 size warning (under hard budget)
 ```
 
+## Local-reference table (for Phase-7 comparison)
+
+Combined PnLs below come from running each variant's `EngineConfig`
+through the full 3-day Round-1 replay with `BacktestSimulator`. Both
+products trade independently in the engine, so the total is exactly
+the sum of the per-product PnLs.
+
+| Variant | File | Local total PnL | ASH PnL | PEPPER PnL | Key reason for inclusion |
+|---------|------|----------------:|--------:|-----------:|--------------------------|
+| Baseline | `trader_round1_baseline.py` | **+23 719** | +7 301 | +16 418 | Reference point. Phase-3 minimum-viable defaults. Every other variant should beat this on official PnL. |
+| Promoted | `trader_round1_promoted.py` | **+60 462** | +6 447 | +54 015 | Cleanest Phase-5 robustness across ASH and PEPPER: best markouts, tightest cross-day variance, lowest limit pinning. Least dependent on local fill model. |
+| Alt | `trader_round1_alt.py` | **+86 591** | +7 747 | +78 844 | Higher-upside variant: taker-heavier ASH + more aggressive PEPPER inventory. Directional bet that the +0.1/step drift and local fill model hold on the official site. |
+
+Phase-7 comparisons should be logged against these local numbers —
+anywhere the official result departs materially, treat it as evidence
+about the local fill model or the drift persistence, not as a signal
+to retune on one data point.
+
+## Submission fingerprints
+
+SHA256 + size per bundle, for tamper-checking and to make sure the
+file you upload matches the one documented here.
+
+| File | Size (bytes) | SHA256 |
+|------|-------------:|--------|
+| `outputs/submissions/round_1/trader_round1_baseline.py` | 88 082 | `b33913594f52a30b45fac7b3db9889e732459e0eec13b9455a07485bbec7bf8f` |
+| `outputs/submissions/round_1/trader_round1_promoted.py` | 88 147 | `d7ed8979539b40961cb713d0eefc3efb2524c5ce268a80400dfe08582227aabd` |
+| `outputs/submissions/round_1/trader_round1_alt.py` | 88 142 | `18d8088dd23e8f1abf5423392416a84c1756ddfd17698dc9d58643d8ba5aa6e9` |
+
+Regenerate and verify with:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m src.scripts.round_1.export_round1_submission
+shasum -a 256 outputs/submissions/round_1/trader_round1_*.py
+```
+
+If the hashes differ after a fresh export, the bundle is sensitive to
+the source commit hash embedded in its banner — compare only the body
+of the file (everything past the banner) or re-export against the
+same commit to produce byte-identical bundles.
+
 ## Carry-ins for Phase 7
 
 - **Confirm position_limit.** The Phase-1 placeholder of 50 affects
