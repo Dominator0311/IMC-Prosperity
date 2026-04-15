@@ -38,7 +38,10 @@ from src.core.config import (
     EngineConfig,
     round1_alt_engine_config,
     round1_baseline_engine_config,
+    round1_f5_engine_config,
+    round1_h1_engine_config,
     round1_promoted_engine_config,
+    round1_test_engine_config,
 )
 from src.scripts.export_submission import (
     REPO_ROOT,
@@ -80,6 +83,44 @@ _VARIANTS: dict[str, dict[str, object]] = {
             "+ C-PEP-B (linear_drift h=32, skew=1.0, flatten=0.9). "
             "Larger PnL ceiling at the cost of more taker / inventory "
             "exposure."
+        ),
+    },
+    "h1": {
+        "factory_name": "round1_h1_engine_config",
+        "factory": round1_h1_engine_config,
+        "label": "Round-1 Phase-8.5 hybrid (promoted PEPPER + alt ASH)",
+        "purpose": (
+            "Phase-8.5 narrow hybrid candidate. Promoted PEPPER leg "
+            "(validated robust default) + alt ASH leg (best official "
+            "ASH on the one Round-1 data point). Captures the "
+            "empirically-justified ASH uplift without adopting alt "
+            "PEPPER's higher-variance inventory bet."
+        ),
+    },
+    "f5": {
+        "factory_name": "round1_f5_engine_config",
+        "factory": round1_f5_engine_config,
+        "label": "Round-1 Phase-9 asymmetric-taker PEPPER + alt ASH",
+        "purpose": (
+            "Phase-9 fastsearch winner. Wall-based ASH (same leg as "
+            "H1 / alt) + promoted PEPPER with per-side taker edges "
+            "(buy=1.5, sell=3.0). A surgical sell-widening that keeps "
+            "promoted's inventory profile and targets the official-"
+            "day Baseline failure mode (early wrong-side PEPPER "
+            "sells) without adopting alt PEPPER's near-limit tail."
+        ),
+    },
+    "test": {
+        "factory_name": "round1_test_engine_config",
+        "factory": round1_test_engine_config,
+        "label": "Round-1 ad-hoc directional (wall ASH + buy-and-hold PEPPER)",
+        "purpose": (
+            "Directional experiment. Wall-based ASH (same leg as F5 "
+            "/ H1) + buy-and-hold PEPPER — take any ask up to the "
+            "position limit, then hold. Upper-bound reference for "
+            "how much of PEPPER's official PnL is drift MTM vs "
+            "market-making edge. Additive; never replaces any "
+            "shipped bundle."
         ),
     },
 }

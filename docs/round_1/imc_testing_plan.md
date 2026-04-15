@@ -11,9 +11,17 @@ uploaded.
 
 ## Upload sequence (recap from Phase 6)
 
-1. `outputs/submissions/round_1/trader_round1_baseline.py`
-2. `outputs/submissions/round_1/trader_round1_promoted.py`
-3. `outputs/submissions/round_1/trader_round1_alt.py`
+1. `outputs/submissions/round_1/trader_round1_baseline.py` — done
+2. `outputs/submissions/round_1/trader_round1_promoted.py` — done
+3. `outputs/submissions/round_1/trader_round1_alt.py` — done
+
+## Phase-8.5 revised candidate
+
+4. `outputs/submissions/round_1/trader_round1_h1.py` — **next upload**
+
+   H1 is the Phase-8.5 narrow hybrid: promoted PEPPER leg + alt ASH
+   leg. Test template and comparison rows below are additive — they
+   do not replace the Phase-6 rows.
 
 Wait for each result before uploading the next.
 
@@ -67,6 +75,10 @@ official site.
 | Alt vs Promoted (PEPPER) | +78 844 vs +54 015 | <fill> | alt wins iff drift persists & limit pinning is not penalised |
 | Alt vs Promoted (ASH) | +7 747 vs +6 447 | <fill> | alt wins iff taker-heavy fills survive |
 | Alt vs Baseline (total) | +87 k vs +24 k | <fill> | alt should win on PnL but cost more risk |
+| **H1 vs Promoted (ASH)** | +7 747 vs +6 447 | <fill> | H1 should win on ASH (alt ASH leg) |
+| **H1 vs Promoted (PEPPER)** | +54 015 vs +54 015 | <fill> | should tie — identical PEPPER leg |
+| **H1 vs Promoted (total)** | +61.8 k vs +60.5 k | <fill> | H1 ≈ Promoted + ASH uplift; expected official Δ ≈ +260 |
+| **H1 vs Alt (total)** | +61.8 k vs +86.6 k | <fill> | Alt should still win locally; on official, H1 wins on lower PEPPER inventory variance |
 
 ## Decision rules (per the implementation plan)
 
@@ -86,6 +98,9 @@ Specific reaction matrix:
 | **Alt ≈ promoted within noise on PEPPER** | The 4× extra near-limit exposure did not earn its keep; promoted's robustness wins. | No action; promoted remains the default. |
 | **All three submissions wildly different from local replay** | Likely position-limit or cadence mismatch; the Phase-1 placeholder limit=50 is the most likely culprit. | Confirm the official limit, re-export all three bundles, retry. |
 | **All three look reasonable but ranking is reversed** | Local replay is over-fitting to the 3-day sample. | Down-weight any future local-replay-only optimisation; consider shipping the baseline as the default in the next round until more official-data samples are available. |
+| **H1 > Promoted on ASH, ≈ on PEPPER** | The Phase-8.5 hypothesis holds: the ewma→wall ASH swap is the correct structural improvement; promoted PEPPER is already the right leg. | Promote H1 to default shipped bundle for Round 2 onward. |
+| **H1 ≈ Promoted (noise)** | Local fill model overstated the ewma→wall ASH gap on this day's official data; single data point may not generalise. | Keep Promoted as default. Do not re-tune. Collect more official-data samples. |
+| **H1 < Promoted** | Alt ASH's official edge was a one-day artefact; wall_mid is worse on different regimes. | Revert. Keep Promoted. Reopen the Phase-8.5 ASH decomposition with the new data. |
 
 ## What not to do
 

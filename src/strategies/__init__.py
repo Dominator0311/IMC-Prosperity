@@ -23,6 +23,7 @@ from types import MappingProxyType
 from src.core.fair_value import FairValueEngine
 from src.core.signals import SignalEngine
 from src.strategies.base import BaseStrategy
+from src.strategies.buy_and_hold import BuyAndHoldStrategy
 from src.strategies.market_making import MarketMakingStrategy
 
 StrategyFactory = Callable[[FairValueEngine, SignalEngine], BaseStrategy]
@@ -30,12 +31,14 @@ StrategyFactory = Callable[[FairValueEngine, SignalEngine], BaseStrategy]
 STRATEGY_REGISTRY: Mapping[str, StrategyFactory] = MappingProxyType(
     {
         "market_making": MarketMakingStrategy,
+        "buy_and_hold": BuyAndHoldStrategy,
     }
 )
 
 __all__ = [
     "STRATEGY_REGISTRY",
     "BaseStrategy",
+    "BuyAndHoldStrategy",
     "MarketMakingStrategy",
     "StrategyFactory",
 ]

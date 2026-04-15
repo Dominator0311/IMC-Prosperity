@@ -10,8 +10,23 @@ the official run.
 > matches local. Full analysis:
 > `docs/round_1/official_results_analysis.md`. Promoted still
 > stands; the ASH leg is flagged for review.
+>
+> **Phase-8.5 follow-up.** A fourth revised candidate **H1** has
+> been exported. H1 = promoted PEPPER leg (validated) + alt ASH leg
+> (best official ASH). Prepared but not uploaded. See
+> `outputs/round_1/phase8_5/hybrid_memo.md`.
+>
+> **Phase-9 fastsearch follow-up.** A fifth candidate **F5** has
+> been exported. F5 = alt ASH leg (same as H1) + promoted PEPPER
+> leg with asymmetric taker edges (buy=1.5, sell=3.0). Prepared
+> but not uploaded. This is the sole new candidate identified in
+> the Phase-9 PEPPER-first search; it preserves promoted's
+> inventory profile while targeting the official-day Baseline
+> failure mode (bucket-0 wrong-side PEPPER sells). See
+> `outputs/round_1/fastsearch/final_recommendation.md` and
+> `outputs/round_1/fastsearch/f5_bundle_metadata.md`.
 
-## Three submission files
+## Submission files
 
 All three are bundled by
 `src/scripts/round_1/export_round1_submission.py` from a single Round-1
@@ -23,6 +38,8 @@ embedded `ProductConfig` fields.
 | 1 | **Baseline / control** | `outputs/submissions/round_1/trader_round1_baseline.py` | `round1_baseline_engine_config()` | ~+24 k |
 | 2 | **Promoted / robust default** | `outputs/submissions/round_1/trader_round1_promoted.py` | `round1_promoted_engine_config()` | ~+60 k |
 | 3 | **Higher-upside alternate** | `outputs/submissions/round_1/trader_round1_alt.py` | `round1_alt_engine_config()` | ~+87 k |
+| 4 | **H1 (Phase-8.5 hybrid)** — promoted PEPPER + alt ASH | `outputs/submissions/round_1/trader_round1_h1.py` | `round1_h1_engine_config()` | ~+61.8 k |
+| 5 | **F5 (Phase-9 asymmetric)** — alt ASH + promoted PEPPER with buy=1.5/sell=3.0 | `outputs/submissions/round_1/trader_round1_f5.py` | `round1_f5_engine_config()` | ~+100.7 k |
 
 Local PnLs are sums of the per-product Phase-5 review-pack PnLs
 (ASH C2 + PEPPER C1b for promoted, ASH C1 + PEPPER C2 for alt; the
@@ -114,6 +131,8 @@ PEPPER specifically; the baseline anchors comparison.
 
 ## Upload order
 
+### Phase 6 (original — already complete)
+
 1. **Baseline first.** Establishes the reference. Do not upload
    anything else until the baseline run is complete and PnL is
    recorded.
@@ -125,6 +144,58 @@ PEPPER specifically; the baseline anchors comparison.
    Compare against both baseline and promoted. If alt out-performs
    promoted on the official site, the directional bet on PEPPER
    drift paid off.
+
+### Phase 8.5 (revised — post-first-official-run)
+
+Given official results have Alt > Promoted > Baseline and the gap
+is dominated by the ASH leg, the **current recommended next upload**
+is:
+
+4. **H1 (revised candidate).** Upload exactly once the slot is
+   available. H1 isolates the empirically-justified ASH uplift
+   (wall_mid + t=0.5) while keeping Promoted's validated PEPPER leg.
+   Expected official uplift over Promoted ≈ +260 PnL
+   (the known ewma→wall gap on Round-1 data). Promotes H1 to
+   default if it beats Promoted; otherwise keep Promoted.
+
+Do **not** re-upload Baseline, Promoted, or Alt. Their official
+results are already in. The default shipped bundle stays at
+Promoted until H1 validates.
+
+### Phase 9 (fastsearch — the next additive candidate)
+
+Prepared but not uploaded:
+
+5. **F5 (asymmetric-taker PEPPER + alt ASH).** Upload after H1 has
+   a data point — or in the same slot cycle if two new slots are
+   available — so that the ASH leg (shared with H1) is held fixed
+   and the **only observed difference** between F5 and H1 on the
+   official site is the PEPPER asymmetric-taker change. That
+   isolates the F5 mechanism to a single observable variable.
+
+   Expected official uplift over Promoted (projected, not
+   observed): ≈ +200-300 PEPPER PnL on the 1000-cadence ratio,
+   landing F5 total near Alt (~+3 040) without importing Alt's
+   near-limit tail risk. Projection method and caveats in
+   `outputs/round_1/fastsearch/final_recommendation.md` §1.
+
+   Local 3-day total: **+100 685** (vs Promoted +60 462, Alt
+   +86 591). The cross-view ranking picture:
+
+   | View | Promoted | Alt | H1 | F5 |
+   |---|---:|---:|---:|---:|
+   | Official total (measured) | +2 518 | +3 040 | +2 780 | _projected ~+2 700-2 900_ |
+   | Local 1000-cadence PEPPER | +16 321 | +21 087 | +16 321 | +18 661 |
+   | Local 3-day PEPPER        | +54 015 | +78 844 | +54 015 | +92 938 |
+   | Off-day near-limit PEPPER | 0 | 22 | 0 | _projected ~6-10_ |
+
+   Do **not** retune based on F5's projected numbers. Projections
+   are from a single-point local-to-official ratio; the IMC run is
+   the only ground truth.
+
+Do **not** re-upload Baseline, Promoted, or Alt. Their official
+results are already in. The default shipped bundle stays at
+Promoted until H1 (and then F5) validates.
 
 ## Acceptance criteria (plan)
 
@@ -176,6 +247,8 @@ file you upload matches the one documented here.
 | `outputs/submissions/round_1/trader_round1_baseline.py` | 88 082 | `b33913594f52a30b45fac7b3db9889e732459e0eec13b9455a07485bbec7bf8f` |
 | `outputs/submissions/round_1/trader_round1_promoted.py` | 88 147 | `d7ed8979539b40961cb713d0eefc3efb2524c5ce268a80400dfe08582227aabd` |
 | `outputs/submissions/round_1/trader_round1_alt.py` | 88 142 | `18d8088dd23e8f1abf5423392416a84c1756ddfd17698dc9d58643d8ba5aa6e9` |
+| `outputs/submissions/round_1/trader_round1_h1.py` | 89 708 | `47217a37f7b7babb077b5e666fcb300e34da3cd93168bf4d2b3a7124fdafacc5` |
+| `outputs/submissions/round_1/trader_round1_f5.py` | 96 970 | `cdef85dd97474c84df4af71b3ba662c3107653beb1cad1e02934c6cde987cc9a` |
 
 Regenerate and verify with:
 
