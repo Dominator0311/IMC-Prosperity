@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from src.core.types import ResidualConfig, ScannerConfig
 
-KNOWN_STRATEGY_NAMES: tuple[str, ...] = ("market_making",)
+KNOWN_STRATEGY_NAMES: tuple[str, ...] = ("buy_and_hold", "market_making")
 KNOWN_ESTIMATOR_NAMES: tuple[str, ...] = (
     "anchor",
     "depth_mid",
@@ -60,6 +60,16 @@ class ProductConfig:
     flatten_threshold: float = 0.8
     history_length: int = 32
     ewma_alpha: float | None = None
+    # Phase-9 fastsearch knobs (all optional, neutral defaults).
+    # See ``outputs/round_1/fastsearch/pepper_memo.md``.
+    taker_edge_buy: float | None = None
+    taker_edge_sell: float | None = None
+    early_window: int = 0
+    early_taker_edge_buy: float | None = None
+    early_taker_edge_sell: float | None = None
+    early_short_cap: int | None = None
+    early_short_skew_mult: float = 1.0
+    early_short_flatten: float | None = None
 
     def __post_init__(self) -> None:
         if self.strategy_name not in KNOWN_STRATEGY_NAMES:
@@ -118,6 +128,33 @@ class ProductConfig:
             raise ValueError(
                 "ProductConfig: fair_value_fallbacks includes 'anchor' "
                 "but anchor_price is not set"
+            )
+        # --- Phase-9 fastsearch knob validation ---
+        if self.taker_edge_buy is not None and self.taker_edge_buy < 0:
+            raise ValueError("ProductConfig.taker_edge_buy must be >= 0 when set")
+        if self.taker_edge_sell is not None and self.taker_edge_sell < 0:
+            raise ValueError("ProductConfig.taker_edge_sell must be >= 0 when set")
+        if self.early_window < 0:
+            raise ValueError("ProductConfig.early_window must be >= 0")
+        if self.early_taker_edge_buy is not None and self.early_taker_edge_buy < 0:
+            raise ValueError("ProductConfig.early_taker_edge_buy must be >= 0 when set")
+        if self.early_taker_edge_sell is not None and self.early_taker_edge_sell < 0:
+            raise ValueError("ProductConfig.early_taker_edge_sell must be >= 0 when set")
+        if self.early_short_skew_mult < 0:
+            raise ValueError("ProductConfig.early_short_skew_mult must be >= 0")
+        if self.early_short_flatten is not None and not 0.0 <= self.early_short_flatten <= 1.0:
+            raise ValueError(
+                "ProductConfig.early_short_flatten must be in [0, 1] when set "
+                f"(got {self.early_short_flatten})"
+            )
+        # An ``early_short_cap`` of e.g. -8 would allow a short of 8 before
+        # the cap kicks in; 0 forbids ever going short. Very negative
+        # caps are effectively a no-op. No hard numeric bound — just
+        # flag values that are structurally nonsense.
+        if self.early_short_cap is not None and self.early_short_cap > 0:
+            raise ValueError(
+                "ProductConfig.early_short_cap must be <= 0 when set "
+                f"(got {self.early_short_cap}); use 0 to forbid ever going short"
             )
 
 
@@ -289,34 +326,13 @@ def _round1_engine_with(**per_product_overrides: dict[str, object]) -> EngineCon
 
 
 def round1_baseline_engine_config() -> EngineConfig:
-    """Phase-6 upload **baseline / control** variant.
-
-    Uses the Phase-3 minimum-viable Round-1 product defaults verbatim.
-    This is the reference point for the official-upload comparison:
-    every subsequent variant should outperform it.
-
-    - ASH_COATED_OSMIUM: wall_mid, maker=1.0, taker=1.0, skew=4.0,
-      flatten=0.7, history=48.
-    - INTARIAN_PEPPER_ROOT: linear_drift, maker=1.5, taker=1.0,
-      skew=2.0, flatten=0.8, history=48.
-    """
+    """Phase-6 baseline / control — Phase-3 Round-1 defaults verbatim."""
     return round1_engine_config()
 
 
 def round1_promoted_engine_config() -> EngineConfig:
-    """Phase-6 upload **promoted / robust default** variant.
-
-    Pair of Phase-5 winners:
-
-    - ASH_COATED_OSMIUM = C-ASH-A: ewma_mid, maker=1.0, taker=0.25,
-      skew=4.0, flatten=0.7, history=48. Promoted over wall_mid for
-      its tighter cross-day PnL variance, better markouts at every
-      horizon, and zero near-limit steps.
-    - INTARIAN_PEPPER_ROOT = C-PEP-A (C1b): linear_drift, maker=1.0,
-      taker=2.0, skew=2.0, flatten=0.7, history=32. Same signal
-      quality as C1 with 57 % less limit pinning.
-
-    See ``outputs/round_1/notes/phase5_review_shortlist.md``.
+    """Phase-6 promoted / robust default. See
+    ``outputs/round_1/notes/phase5_review_shortlist.md``.
     """
     return _round1_engine_with(
         ASH_COATED_OSMIUM=dict(
@@ -340,20 +356,97 @@ def round1_promoted_engine_config() -> EngineConfig:
     )
 
 
+def round1_h1_engine_config() -> EngineConfig:
+    """Phase-8.5 hybrid H1 — promoted PEPPER + alt wall_mid ASH.
+
+    Additive; does not replace promoted / alt. See
+    ``outputs/round_1/phase8_5/hybrid_memo.md``.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            fair_value_method="wall_mid",
+            fair_value_fallbacks=("mid", "microprice"),
+            maker_edge=1.5,
+            taker_edge=0.5,
+            inventory_skew=4.0,
+            flatten_threshold=0.7,
+            history_length=48,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            maker_edge=1.0,
+            taker_edge=2.0,
+            inventory_skew=2.0,
+            flatten_threshold=0.7,
+            history_length=32,
+        ),
+    )
+
+
+def round1_f5_engine_config() -> EngineConfig:
+    """Phase-9 fastsearch F5 candidate — asymmetric-taker PEPPER + alt ASH.
+
+    ASH leg = H1 / Alt wall_mid leg. PEPPER leg = promoted leg with
+    per-side taker edges (buy=1.5, sell=3.0); all other PEPPER knobs
+    match promoted. Additive export; does not replace promoted / H1 /
+    alt. See ``outputs/round_1/fastsearch/final_recommendation.md``.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            fair_value_method="wall_mid",
+            fair_value_fallbacks=("mid", "microprice"),
+            maker_edge=1.5,
+            taker_edge=0.5,
+            inventory_skew=4.0,
+            flatten_threshold=0.7,
+            history_length=48,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            maker_edge=1.0,
+            taker_edge=2.0,
+            taker_edge_buy=1.5,
+            taker_edge_sell=3.0,
+            inventory_skew=2.0,
+            flatten_threshold=0.7,
+            history_length=32,
+        ),
+    )
+
+
+def round1_test_engine_config() -> EngineConfig:
+    """Test — wall-based ASH (same as F5/H1) + buy-and-hold PEPPER.
+
+    Directional upper-bound reference; additive; never replaces a
+    shipped bundle.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            fair_value_method="wall_mid",
+            fair_value_fallbacks=("mid", "microprice"),
+            maker_edge=1.5,
+            taker_edge=0.5,
+            inventory_skew=4.0,
+            flatten_threshold=0.7,
+            history_length=48,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            strategy_name="buy_and_hold",
+            fair_value_method="mid",
+            fair_value_fallbacks=(),
+            # Bump max_aggressive_size so one tick is enough to fill
+            # most of the position limit (50). Keeps the remaining
+            # session truly "hold".
+            max_aggressive_size=50,
+        ),
+    )
+
+
 def round1_alt_engine_config() -> EngineConfig:
-    """Phase-6 upload **higher-upside alternate** variant.
-
-    Pair of Phase-5 higher-upside candidates:
-
-    - ASH_COATED_OSMIUM = C-ASH-B: wall_mid, maker=1.5, taker=0.5,
-      skew=4.0, flatten=0.7, history=48. ~20 % more local PnL than
-      C-ASH-A; depends more on the local fill model.
-    - INTARIAN_PEPPER_ROOT = C-PEP-B: linear_drift, maker=1.0,
-      taker=2.0, skew=1.0, flatten=0.9, history=32. Directional bet
-      on drift persistence; ~40 % more PnL than C-PEP-A at 4x the
-      near-limit exposure.
-
-    See ``outputs/round_1/notes/phase5_review_shortlist.md``.
+    """Phase-6 higher-upside alternate. See
+    ``outputs/round_1/notes/phase5_review_shortlist.md``.
     """
     return _round1_engine_with(
         ASH_COATED_OSMIUM=dict(
