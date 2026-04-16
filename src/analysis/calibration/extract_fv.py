@@ -99,55 +99,191 @@ def build_fact_table(
     *,
     own_trade_records: Sequence[TradeRow] | None = None,
     bot_seat: str = "SUBMISSION",
+    mode: str = "auto",
 ) -> dict[str, list[FactRow]]:
     """Join book snapshots with recovered server fair value per product.
 
-    ``own_trade_records`` (if provided) is scanned for the buy price
-    of the hold-one entry per product. Falls back to using the best_ask
-    at the first observed timestamp for that product.
+    Two recovery modes:
+
+    ``hold_one`` — fast path for the dedicated hold-1 trader. Assumes
+        the trader bought 1 unit at t=0 and held forever.
+        ``server_fv(t) = pnl(t) + buy_price``.
+
+    ``general`` — works for any submission with own trades. Reconstructs
+        cash and position per product from the trade history, then
+        recovers ``server_fv(t) = (pnl(t) - cash(t)) / position(t)`` at
+        every tick where position != 0. Ticks with position == 0 are
+        dropped (FV unrecoverable).
+
+    ``auto`` (default) — picks ``hold_one`` if every own trade is a
+        single buy of qty 1 at t=0 with no further trades, otherwise
+        ``general``.
     """
     by_product: dict[str, list[Mapping[str, Any]]] = {}
     for row in records:
         product = row["product"]
         by_product.setdefault(product, []).append(row)
 
-    own_buy_prices = _recover_entry_prices(
-        own_trade_records or [], expected_bot=bot_seat
-    )
+    own_trades = list(own_trade_records or [])
+    resolved_mode = _resolve_mode(mode, own_trades=own_trades, bot_seat=bot_seat)
+    LOGGER.info("FV recovery mode: %s", resolved_mode)
 
     facts: dict[str, list[FactRow]] = {}
     for product, rows in by_product.items():
         rows_sorted = sorted(rows, key=lambda r: (r["day"], r["timestamp"]))
-        buy_price = own_buy_prices.get(product)
-        if buy_price is None:
-            # Fall back to t0 best_ask (the hold-one trader buys there).
-            buy_price = _first_best_ask(rows_sorted, product)
-        product_facts: list[FactRow] = []
-        for row in rows_sorted:
-            pnl = row["profit_and_loss"]
-            server_fv = pnl + buy_price
-            product_facts.append(
-                FactRow(
-                    timestamp=row["timestamp"],
-                    product=product,
-                    server_fv=server_fv,
-                    bids=_levels(row, side="bid"),
-                    asks=_levels(row, side="ask"),
-                    mid_price=row.get("mid_price"),
-                    pnl=pnl,
-                )
+        if resolved_mode == "hold_one":
+            product_facts = _build_hold_one_facts(
+                rows_sorted, product=product,
+                own_trades=own_trades, bot_seat=bot_seat,
+            )
+        else:
+            product_facts = _build_general_facts(
+                rows_sorted, product=product,
+                own_trades=own_trades, bot_seat=bot_seat,
             )
         facts[product] = product_facts
-        LOGGER.info(
-            "Built fact table for %s: %d ticks, buy_price=%.2f, "
-            "fv range=[%.4f, %.4f]",
-            product,
-            len(product_facts),
-            buy_price,
-            min(f.server_fv for f in product_facts),
-            max(f.server_fv for f in product_facts),
-        )
+        if product_facts:
+            LOGGER.info(
+                "Built fact table for %s: %d/%d ticks recoverable, "
+                "fv range=[%.4f, %.4f]",
+                product,
+                len(product_facts),
+                len(rows_sorted),
+                min(f.server_fv for f in product_facts),
+                max(f.server_fv for f in product_facts),
+            )
+        else:
+            LOGGER.warning(
+                "No usable fact rows for %s — trader had position == 0 "
+                "for every tick, or own-trade detection failed (no trade "
+                "matched bot_seat=%r).",
+                product,
+                bot_seat,
+            )
     return facts
+
+
+def _resolve_mode(
+    mode: str,
+    *,
+    own_trades: Sequence[TradeRow],
+    bot_seat: str,
+) -> str:
+    """Pick a recovery mode automatically when ``mode='auto'``."""
+    if mode == "hold_one":
+        return "hold_one"
+    if mode == "general":
+        return "general"
+    if mode != "auto":
+        raise ValueError(f"Unknown mode {mode!r}; expected hold_one/general/auto.")
+    own = [t for t in own_trades if _is_own_trade(t, bot_seat=bot_seat)]
+    if not own:
+        # No own trades detected — fall through to hold_one fallback path
+        # (which uses t=0 best_ask as a guess).
+        return "hold_one"
+    is_hold_one = (
+        all(t.timestamp == 0 for t in own)
+        and all(_signed_qty(t, bot_seat) == 1 for t in own)
+    )
+    return "hold_one" if is_hold_one else "general"
+
+
+def _build_hold_one_facts(
+    rows_sorted: Sequence[Mapping[str, Any]],
+    *,
+    product: str,
+    own_trades: Sequence[TradeRow],
+    bot_seat: str,
+) -> list[FactRow]:
+    """Hold-one fast path: server_fv(t) = pnl(t) + buy_price."""
+    own_buy_prices = _recover_entry_prices(own_trades, expected_bot=bot_seat)
+    buy_price = own_buy_prices.get(product)
+    if buy_price is None:
+        buy_price = _first_best_ask(rows_sorted, product)
+    out: list[FactRow] = []
+    for row in rows_sorted:
+        pnl = row["profit_and_loss"]
+        server_fv = pnl + buy_price
+        out.append(FactRow(
+            timestamp=row["timestamp"], product=product, server_fv=server_fv,
+            bids=_levels(row, side="bid"), asks=_levels(row, side="ask"),
+            mid_price=row.get("mid_price"), pnl=pnl,
+        ))
+    return out
+
+
+def _build_general_facts(
+    rows_sorted: Sequence[Mapping[str, Any]],
+    *,
+    product: str,
+    own_trades: Sequence[TradeRow],
+    bot_seat: str,
+) -> list[FactRow]:
+    """General path: server_fv(t) = (pnl(t) - cash(t)) / position(t).
+
+    Reconstructs (cash, position) trajectories from the own-trade stream
+    by replaying trades in timestamp order. Skips ticks where the
+    reconstructed position is zero (FV unrecoverable on those ticks).
+
+    Sign convention:
+        - Own buy:  position += qty,  cash -= price * qty
+        - Own sell: position -= qty,  cash += price * qty
+    """
+    product_trades = sorted(
+        [t for t in own_trades if t.product == product
+         and _is_own_trade(t, bot_seat=bot_seat)],
+        key=lambda t: t.timestamp,
+    )
+    out: list[FactRow] = []
+    trade_idx = 0
+    cash = 0.0
+    position = 0
+    skipped_zero_pos = 0
+    for row in rows_sorted:
+        ts = row["timestamp"]
+        # Apply every own trade with timestamp <= current row's timestamp.
+        while trade_idx < len(product_trades) and product_trades[trade_idx].timestamp <= ts:
+            tr = product_trades[trade_idx]
+            qty_signed = _signed_qty(tr, bot_seat)
+            cash -= qty_signed * tr.price  # buys reduce cash, sells increase
+            position += qty_signed
+            trade_idx += 1
+        if position == 0:
+            skipped_zero_pos += 1
+            continue
+        pnl = row["profit_and_loss"]
+        server_fv = (pnl - cash) / position
+        out.append(FactRow(
+            timestamp=ts, product=product, server_fv=server_fv,
+            bids=_levels(row, side="bid"), asks=_levels(row, side="ask"),
+            mid_price=row.get("mid_price"), pnl=pnl,
+        ))
+    if skipped_zero_pos:
+        LOGGER.info(
+            "%s general-mode: skipped %d ticks with position==0 "
+            "(FV unrecoverable). %d trades replayed, final position=%d, "
+            "final cash=%.2f.",
+            product, skipped_zero_pos, len(product_trades), position, cash,
+        )
+    return out
+
+
+def _is_own_trade(trade: TradeRow, *, bot_seat: str) -> bool:
+    """True iff the trader-of-interest is one side of this trade."""
+    return trade.buyer == bot_seat or trade.seller == bot_seat
+
+
+def _signed_qty(trade: TradeRow, bot_seat: str) -> int:
+    """+qty if we bought, -qty if we sold."""
+    if trade.buyer == bot_seat:
+        return abs(trade.quantity)
+    if trade.seller == bot_seat:
+        return -abs(trade.quantity)
+    raise ValueError(
+        f"Trade at t={trade.timestamp} has neither buyer nor seller "
+        f"matching bot_seat={bot_seat!r}: buyer={trade.buyer!r}, "
+        f"seller={trade.seller!r}"
+    )
 
 
 def filter_trades_by_product(
