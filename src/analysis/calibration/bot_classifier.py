@@ -33,6 +33,8 @@ from src.analysis.calibration.types import DepthBand, FactRow
 DEFAULT_MAX_LEVELS = 3  # IMC exposes up to 3 levels per side
 DEFAULT_OFFSET_MARGIN = 1.0  # padding around observed offset range
 DEFAULT_MIN_PRESENCE_RATE = 0.01
+DEFAULT_BIMODALITY_GAP = 3.0  # ticks: minimum mode separation to trigger split
+DEFAULT_BIMODALITY_MIN_MASS = 0.01  # drop clusters below 1% of samples (noise)
 
 
 def detect_depth_bands(
@@ -41,17 +43,28 @@ def detect_depth_bands(
     max_levels: int = DEFAULT_MAX_LEVELS,
     offset_margin: float = DEFAULT_OFFSET_MARGIN,
     min_presence_rate: float = DEFAULT_MIN_PRESENCE_RATE,
+    bimodality_gap: float = DEFAULT_BIMODALITY_GAP,
+    bimodality_min_mass: float = DEFAULT_BIMODALITY_MIN_MASS,
 ) -> tuple[DepthBand, ...]:
-    """Classify book levels by their rank position.
+    """Classify book levels by rank, splitting bimodal ranks into sub-bands.
 
-    For each (side, rank) in {bid, ask} x {1..max_levels}, collect
-    every observed level price minus fair value, then build a band
-    that covers the empirical [min, max] offset range with a small
-    margin. Bands with presence below ``min_presence_rate`` (e.g., the
-    rarely-occupied 3rd level) are dropped.
+    For each (side, rank) in {bid, ask} x {1..max_levels}:
 
-    Returns bands sorted by side then by rank (level1 first = closest
-    to FV).
+      1. Collect every observed level price minus fair value.
+      2. Detect bimodality: if the offset distribution has two clusters
+         separated by >= ``bimodality_gap`` ticks AND the smaller cluster
+         holds >= ``bimodality_min_mass`` of samples, emit two sub-bands
+         (one per cluster).
+      3. Otherwise emit a single band covering [min, max] of offsets.
+
+    Bimodality is the signature of two bots sharing the same rank — most
+    commonly an "inside" bot (near FV) that displaces the wall bot when
+    it's active. The two sub-bands let downstream rule search recover
+    each bot's quote rule independently rather than fitting a hybrid
+    formula that matches neither.
+
+    Bands with presence below ``min_presence_rate`` are dropped.
+    Returns bands sorted by side then rank then proximity to FV.
     """
     out: list[DepthBand] = []
     for side in ("bid", "ask"):
@@ -64,14 +77,25 @@ def detect_depth_bands(
             if presence < min_presence_rate:
                 continue
             arr = np.asarray(offsets)
-            band = DepthBand(
-                name=_band_name(side=side, rank=rank, center=float(arr.mean())),
-                side=side,
-                offset_min=float(arr.min() - offset_margin),
-                offset_max=float(arr.max() + offset_margin),
-                presence_rate=presence,
+            clusters = _detect_clusters(
+                arr, gap=bimodality_gap, min_mass=bimodality_min_mass,
             )
-            out.append(band)
+            for sub_idx, cluster in enumerate(clusters):
+                cluster_arr = arr[cluster]
+                cluster_presence = len(cluster_arr) / len(facts)
+                if cluster_presence < min_presence_rate:
+                    continue
+                suffix = f"_sub{sub_idx + 1}" if len(clusters) > 1 else ""
+                out.append(DepthBand(
+                    name=_band_name(
+                        side=side, rank=rank,
+                        center=float(cluster_arr.mean()),
+                    ) + suffix,
+                    side=side,
+                    offset_min=float(cluster_arr.min() - offset_margin),
+                    offset_max=float(cluster_arr.max() + offset_margin),
+                    presence_rate=cluster_presence,
+                ))
     return tuple(out)
 
 
@@ -138,6 +162,48 @@ def _collect_offsets_at_rank(
             level = levels[rank - 1]
             out.append(level.price - fact.server_fv)
     return out
+
+
+def _detect_clusters(
+    offsets: np.ndarray, *, gap: float, min_mass: float,
+) -> list[np.ndarray]:
+    """Split an offset array into clusters separated by >= ``gap`` ticks.
+
+    Returns a list of boolean masks (one per cluster) indexing back into
+    ``offsets``.
+
+    Algorithm:
+      1. Sort offsets, find every successive diff >= ``gap``, declare a
+         split point there.
+      2. Drop clusters whose mass is < ``min_mass`` of all samples
+         (likely noise / outliers).
+      3. If only one cluster remains after pruning, return it (no split).
+         Otherwise return all surviving clusters.
+    """
+    if len(offsets) < 2:
+        return [np.ones(len(offsets), dtype=bool)]
+    sort_idx = np.argsort(offsets)
+    sorted_off = offsets[sort_idx]
+    diffs = np.diff(sorted_off)
+    split_points = np.where(diffs >= gap)[0]
+    if len(split_points) == 0:
+        return [np.ones(len(offsets), dtype=bool)]
+
+    n = len(offsets)
+    starts = [0] + [int(p) + 1 for p in split_points]
+    ends = [int(p) + 1 for p in split_points] + [len(sorted_off)]
+    surviving: list[np.ndarray] = []
+    for s, e in zip(starts, ends):
+        original_indices = sort_idx[s:e]
+        mass = len(original_indices) / n
+        if mass < min_mass:
+            continue  # drop noise cluster, keep evaluating others
+        mask = np.zeros(n, dtype=bool)
+        mask[original_indices] = True
+        surviving.append(mask)
+    if len(surviving) <= 1:
+        return [np.ones(n, dtype=bool)]
+    return surviving
 
 
 def _band_name(*, side: str, rank: int, center: float) -> str:

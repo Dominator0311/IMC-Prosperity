@@ -142,6 +142,86 @@ def test_fv_process_recovers_sigma(synthetic_data):
         assert 0.7 < vr < 1.3, f"VR({k})={vr:.3f} outside [0.7, 1.3]"
 
 
+def test_ar1_phi_demeaned_no_drift_bias():
+    """AR(1) phi should be ~0 even when FV has strong drift.
+
+    Reproduces the PEPPER bug: a pure random walk with drift +0.1/tick
+    was producing phi=+0.21 because the AR(1) estimator was not
+    demeaning. After the fix, phi should be near 0 within standard error.
+    """
+    rng = random.Random(SEED + 1)
+
+    def gauss() -> float:
+        u1 = max(rng.random(), 1e-12)
+        u2 = rng.random()
+        return math.sqrt(-2.0 * math.log(u1)) * math.cos(2 * math.pi * u2)
+
+    fv = 12000.0
+    facts: list[FactRow] = []
+    for tick in range(5000):
+        ts = tick * 100
+        if tick > 0:
+            fv += 0.1 + 0.5 * gauss()  # drift +0.1, sigma 0.5, NO autocorr
+        facts.append(FactRow(
+            timestamp=ts, product="DRIFT", server_fv=fv,
+            bids=(), asks=(), mid_price=fv, pnl=0.0,
+        ))
+    fit = fit_fair_value_process(facts)
+    assert abs(fit.mean_return - 0.1) < 0.02, (
+        f"drift recovery off: mean={fit.mean_return:.4f}"
+    )
+    # Phi must be statistically zero (within ~4 SE) once we demean.
+    assert abs(fit.ar1_phi) < 4 * fit.ar1_phi_se, (
+        f"AR(1) phi appears nonzero with drift present "
+        f"(should be near 0 after demean fix): "
+        f"phi={fit.ar1_phi:+.4f} +/- {fit.ar1_phi_se:.4f}"
+    )
+
+
+def test_bimodal_rank_splits_into_sub_bands():
+    """When two bots share a rank with separated offsets, bands split.
+
+    Constructs ASK level1 with two populations:
+      - 70% of ticks: 'wall' bot at offset +8
+      - 30% of ticks: 'inside' bot at offset +1
+
+    Expected: detect_depth_bands emits two ASK bands at rank 1.
+    """
+    rng = random.Random(SEED + 2)
+    facts: list[FactRow] = []
+    for tick in range(2000):
+        fv = 5000.0
+        if rng.random() < 0.30:
+            ask_price = int(fv) + 1  # inside bot
+        else:
+            ask_price = int(fv) + 8  # wall bot
+        bid_price = int(fv) - 8
+        facts.append(FactRow(
+            timestamp=tick * 100, product="P", server_fv=fv,
+            bids=(BookLevel(price=bid_price, volume=10),),
+            asks=(BookLevel(price=ask_price, volume=10),),
+            mid_price=fv, pnl=0.0,
+        ))
+    bands = detect_depth_bands(facts)
+    ask_bands_at_rank1 = [
+        b for b in bands
+        if b.side == "ask" and b.name.startswith("level1_")
+    ]
+    assert len(ask_bands_at_rank1) == 2, (
+        f"expected 2 sub-bands at ask rank 1, got "
+        f"{[b.name for b in ask_bands_at_rank1]}"
+    )
+    centers = sorted(
+        0.5 * (b.offset_min + b.offset_max) for b in ask_bands_at_rank1
+    )
+    assert 0 <= centers[0] <= 2, (
+        f"low sub-band center {centers[0]:.2f} not near +1"
+    )
+    assert 7 <= centers[1] <= 9, (
+        f"high sub-band center {centers[1]:.2f} not near +8"
+    )
+
+
 def test_depth_bands_are_detected(synthetic_data):
     facts, _ = synthetic_data
     bands = detect_depth_bands(facts)

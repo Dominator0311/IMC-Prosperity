@@ -49,10 +49,11 @@ class Trader:
         self,
         config: EngineConfig | None = None,
         *,
+        state_store: StateStore | None = None,
         reraise_exceptions: bool = False,
     ) -> None:
         self.config = config or default_engine_config()
-        self.state_store = StateStore(
+        self.state_store = state_store or StateStore(
             version=self.config.state_version,
             max_chars=self.config.max_trader_data_chars,
         )
