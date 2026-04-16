@@ -296,6 +296,40 @@ def filter_trades_by_product(
     return out
 
 
+def load_trades_csv(path: Path) -> list[TradeRow]:
+    """Parse an IMC ``trades_round_*_day_*.csv`` file into TradeRow records.
+
+    The CSV header is:
+        timestamp;buyer;seller;symbol;currency;price;quantity
+
+    Buyer/seller fields are typically empty in market-trade CSVs (the
+    book is anonymized — only the player's own trades carry the team
+    seat in the buyer/seller fields). Downstream consumers must infer
+    trade direction from price relative to fair value, not from the
+    buyer/seller fields alone.
+    """
+    rows: list[TradeRow] = []
+    with path.open() as fh:
+        reader = csv.DictReader(fh, delimiter=";")
+        for raw in reader:
+            try:
+                rows.append(TradeRow(
+                    timestamp=int(raw["timestamp"]),
+                    product=raw["symbol"],
+                    price=int(float(raw["price"])),
+                    quantity=int(raw["quantity"]),
+                    buyer=raw.get("buyer") or None,
+                    seller=raw.get("seller") or None,
+                ))
+            except (KeyError, ValueError) as exc:
+                LOGGER.warning(
+                    "Skipping malformed trade row in %s: %r (%s)",
+                    path, raw, exc,
+                )
+    LOGGER.info("Loaded %d trades from %s", len(rows), path)
+    return rows
+
+
 # ----------------------------------------------------------- internals
 
 

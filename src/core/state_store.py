@@ -221,3 +221,36 @@ class StateStore:
             if isinstance(item, (int, float)):
                 out[str(key)] = float(item)
         return out
+
+
+class InMemoryStateStore(StateStore):
+    """Backtest/research-only state store that skips JSON round-trips."""
+
+    _TOKEN = "__IN_MEMORY_ENGINE_STATE__"
+
+    def __init__(
+        self,
+        version: int = 1,
+        max_chars: int = 50_000,
+        max_history: int = _MAX_PERSISTED_HISTORY,
+        truncated_history_keep: int = _TRUNCATED_HISTORY_KEEP,
+    ) -> None:
+        super().__init__(
+            version=version,
+            max_chars=max_chars,
+            max_history=max_history,
+            truncated_history_keep=truncated_history_keep,
+        )
+        self._cached_state: EngineState | None = None
+
+    def load(self, trader_data: str | None) -> EngineState:
+        if trader_data == self._TOKEN and self._cached_state is not None:
+            return self._cached_state
+        return super().load(trader_data)
+
+    def save(self, state: EngineState) -> str:
+        self._cached_state = state
+        return self._TOKEN
+
+    def clear(self) -> None:
+        self._cached_state = None

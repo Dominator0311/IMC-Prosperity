@@ -61,7 +61,12 @@ def fit_fair_value_process(
     sigma = float(np.std(returns, ddof=1))
     mean_return = float(np.mean(returns))
 
-    phi, phi_se = _ar1_fit(returns)
+    # AR(1) is fit on demeaned returns. Failing to demean introduces a
+    # spurious positive phi when the series has any drift: both x_t and
+    # x_{t+1} are biased above zero so their cross-product is biased up.
+    # We saw exactly this on PEPPER (drift +0.094/tick produced a fake
+    # phi=+0.21). Demeaning isolates true autocorrelation from drift.
+    phi, phi_se = _ar1_fit(returns - mean_return)
     vr = tuple(_variance_ratio(returns, k) for k in vr_horizons)
     grid = _detect_quantization(fv, min_atoms=quantization_atoms)
 

@@ -28,6 +28,7 @@ from src.analysis.calibration.extract_fv import (
     extract_trade_records,
     filter_trades_by_product,
     load_activity_log,
+    load_trades_csv,
 )
 from src.analysis.calibration.fair_value_fit import fit_fair_value_process
 from src.analysis.calibration.rule_search import (
@@ -59,6 +60,15 @@ def main(argv: list[str] | None = None) -> int:
         help="String identifying our trader in the buyer/seller fields",
     )
     parser.add_argument(
+        "--trades-csv", type=Path, action="append", default=[],
+        help=(
+            "Path to an IMC trades_round_*_day_*.csv. Trades from these "
+            "files supplement (or replace, when activity log has no trades) "
+            "the trade-history embedded in the activity log. May be passed "
+            "multiple times to combine days."
+        ),
+    )
+    parser.add_argument(
         "--no-plots", action="store_true", help="Skip diagnostic plotting"
     )
     parser.add_argument(
@@ -78,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     book_records = extract_book_records(payload)
     trade_records = extract_trade_records(payload)
     LOGGER.info(
-        "Found %d book records, %d trade records",
+        "Found %d book records, %d trade records (in activity log)",
         len(book_records),
         len(trade_records),
     )
@@ -86,7 +96,16 @@ def main(argv: list[str] | None = None) -> int:
     facts_by_product = build_fact_table(
         book_records, own_trade_records=trade_records, bot_seat=args.bot_seat
     )
-    trades_by_product = filter_trades_by_product(trade_records)
+
+    # Supplement (or substitute) with market-trade CSVs when provided.
+    market_trades = list(trade_records)
+    for csv_path in args.trades_csv:
+        market_trades.extend(load_trades_csv(csv_path))
+    trades_by_product = filter_trades_by_product(market_trades)
+    LOGGER.info(
+        "Total trades for fitting: %d (across %d products)",
+        len(market_trades), len(trades_by_product),
+    )
 
     calibrations: list[ProductCalibration] = []
     for product, facts in facts_by_product.items():
@@ -98,8 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         rules = tuple(search_quote_rule(facts, b) for b in bands)
         volumes = tuple(fit_volume_distribution(facts, b) for b in bands)
         arrivals = fit_trade_arrivals(facts, product_trades)
-        sizes_buy = fit_trade_sizes(product_trades, side="buy")
-        sizes_sell = fit_trade_sizes(product_trades, side="sell")
+        sizes_buy = fit_trade_sizes(product_trades, side="buy", facts=facts)
+        sizes_sell = fit_trade_sizes(product_trades, side="sell", facts=facts)
         loc_buy = fit_trade_locations(facts, product_trades, side="buy")
         loc_sell = fit_trade_locations(facts, product_trades, side="sell")
 

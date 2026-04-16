@@ -194,20 +194,26 @@ def fit_volume_distribution(
 def _collect_band_samples(
     facts: Sequence[FactRow], band: DepthBand
 ) -> list[tuple[float, int]]:
-    """Return [(server_fv, observed_price), ...] for levels at this band's rank.
+    """Return [(server_fv, observed_price), ...] for levels in this band.
 
-    Uses the rank embedded in the band name (``level1_*``, ``level2_*``,
-    etc.) to pick the correct level rather than offset windowing — this
-    avoids cross-contamination between adjacent bots whose offset
-    distributions may abut.
+    The band identifies a (side, rank) pair via its name. When the band
+    name contains a ``_subN`` suffix (the bimodality split), we
+    additionally filter by the band's offset window so each sub-band
+    only sees the observations belonging to its cluster.
     """
     rank = _rank_from_name(band.name)
+    is_sub_band = "_sub" in band.name
     out: list[tuple[float, int]] = []
     for fact in facts:
         levels = fact.bids if band.side == "bid" else fact.asks
-        if len(levels) >= rank:
-            level = levels[rank - 1]
-            out.append((fact.server_fv, level.price))
+        if len(levels) < rank:
+            continue
+        level = levels[rank - 1]
+        if is_sub_band:
+            offset = level.price - fact.server_fv
+            if not (band.offset_min <= offset <= band.offset_max):
+                continue
+        out.append((fact.server_fv, level.price))
     return out
 
 
@@ -215,11 +221,18 @@ def _collect_band_volumes(
     facts: Sequence[FactRow], band: DepthBand
 ) -> list[int]:
     rank = _rank_from_name(band.name)
+    is_sub_band = "_sub" in band.name
     out: list[int] = []
     for fact in facts:
         levels = fact.bids if band.side == "bid" else fact.asks
-        if len(levels) >= rank:
-            out.append(levels[rank - 1].volume)
+        if len(levels) < rank:
+            continue
+        level = levels[rank - 1]
+        if is_sub_band:
+            offset = level.price - fact.server_fv
+            if not (band.offset_min <= offset <= band.offset_max):
+                continue
+        out.append(level.volume)
     return out
 
 

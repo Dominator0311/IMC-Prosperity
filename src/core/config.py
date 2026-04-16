@@ -444,6 +444,51 @@ def round1_test_engine_config() -> EngineConfig:
     )
 
 
+def round1_v2_clean_engine_config() -> EngineConfig:
+    """v2_clean stub — delegates to round1_test for import chain."""
+    return round1_test_engine_config()
+
+
+def _round1_ladder_base() -> EngineConfig:
+    """Shared base for Phase-J/K ladder variants."""
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            strategy_name="ash_ladder",
+            fair_value_method="weighted_mid",
+            fair_value_fallbacks=("wall_mid", "mid"),
+            maker_edge=2.5,
+            taker_edge=0.5,
+            flatten_threshold=0.7,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            strategy_name="buy_and_hold",
+            fair_value_method="mid",
+            fair_value_fallbacks=(),
+            max_aggressive_size=80,
+        ),
+    )
+
+
+def round1_ash_deep_k1_engine_config() -> EngineConfig:
+    """Phase-K K1 — J2_heavier (weights 4/1/1 on 2.5/5/8)."""
+    return _round1_ladder_base()
+
+
+def round1_ash_deep_k2_engine_config() -> EngineConfig:
+    """Phase-K K2 — J2_tight (2.5/4/6 with weights 3/1/1)."""
+    return _round1_ladder_base()
+
+
+def round1_ash_deep_k3_engine_config() -> EngineConfig:
+    """Phase-K K3 — J2_4lvl (2.5/5/8/12 with weights 3/1/1/1)."""
+    return _round1_ladder_base()
+
+
+def round1_ash_deep_k5_engine_config() -> EngineConfig:
+    """Phase-K K5 — J2_asym_flip (buy tight, sell wide)."""
+    return _round1_ladder_base()
+
+
 def round1_alt_engine_config() -> EngineConfig:
     """Phase-6 higher-upside alternate. See
     ``outputs/round_1/notes/phase5_review_shortlist.md``.

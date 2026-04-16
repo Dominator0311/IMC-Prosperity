@@ -57,10 +57,18 @@ def fit_trade_arrivals(
     active_steps = sum(1 for ts in timestamps if ts in active_set)
     p_active = active_steps / n_ticks
 
-    n_buys = sum(1 for trade in trades if _classify_side(trade) == "buy")
-    n_classified = sum(
-        1 for trade in trades if _classify_side(trade) in ("buy", "sell")
-    )
+    fv_by_ts = {f.timestamp: f.server_fv for f in facts}
+    n_buys = 0
+    n_classified = 0
+    for trade in trades:
+        side = _classify_side(trade)
+        if side == "unknown" and trade.timestamp in fv_by_ts:
+            side = classify_side_by_fv(trade, fv_by_ts[trade.timestamp])
+        if side == "buy":
+            n_buys += 1
+            n_classified += 1
+        elif side == "sell":
+            n_classified += 1
     p_buy = n_buys / n_classified if n_classified > 0 else 0.5
 
     ks_stat = _geometric_gap_ks(
@@ -79,18 +87,28 @@ def fit_trade_arrivals(
 
 
 def fit_trade_sizes(
-    trades: Sequence[TradeRow], *, side: str
+    trades: Sequence[TradeRow],
+    *,
+    side: str,
+    facts: Sequence[FactRow] | None = None,
 ) -> TradeSizeFit:
     """Empirical categorical distribution of quantities for one side.
 
-    ``side`` must be 'buy' or 'sell'. Trades whose direction cannot be
-    classified (no buyer/seller info available) are skipped.
+    ``side`` must be 'buy' or 'sell'. Trades are classified by buyer/
+    seller fields when populated; when blank (the standard IMC
+    market-trades CSV format), classification falls back to comparing
+    print price against server FV (requires ``facts`` argument).
     """
     if side not in ("buy", "sell"):
         raise ValueError(f"side must be 'buy' or 'sell'; got {side!r}")
-    quantities = [
-        trade.quantity for trade in trades if _classify_side(trade) == side
-    ]
+    fv_by_ts = {f.timestamp: f.server_fv for f in facts} if facts else {}
+    quantities: list[int] = []
+    for trade in trades:
+        classified = _classify_side(trade)
+        if classified == "unknown" and trade.timestamp in fv_by_ts:
+            classified = classify_side_by_fv(trade, fv_by_ts[trade.timestamp])
+        if classified == side:
+            quantities.append(trade.quantity)
     if not quantities:
         return TradeSizeFit(
             side=side, sizes=(), probabilities=(), n_samples=0
@@ -119,16 +137,22 @@ def fit_trade_locations(
     is a strong end-to-end validation: if your bot rules + arrival
     rate + side prob compose to put trades in the right bins, your
     pipeline is internally consistent.
+
+    Trade direction is classified from buyer/seller fields when
+    populated, otherwise inferred from price-vs-FV.
     """
     if side not in ("buy", "sell"):
         raise ValueError(f"side must be 'buy' or 'sell'; got {side!r}")
     fv_by_ts = {fact.timestamp: fact.server_fv for fact in facts}
     offsets: list[float] = []
     for trade in trades:
-        if _classify_side(trade) != side:
-            continue
         fv = fv_by_ts.get(trade.timestamp)
         if fv is None:
+            continue
+        classified = _classify_side(trade)
+        if classified == "unknown":
+            classified = classify_side_by_fv(trade, fv)
+        if classified != side:
             continue
         offsets.append(trade.price - fv)
     if not offsets:
@@ -153,23 +177,44 @@ def fit_trade_locations(
 def _classify_side(trade: TradeRow) -> str:
     """Infer buy/sell from the IMC buyer/seller convention.
 
-    IMC labels every market trade with a buyer and seller seat ID.
-    The trader-of-interest's seat ('SUBMISSION') is irrelevant here;
-    we want the *taker* side. By convention in the IMC log, when the
-    market had an aggressing buyer the trade is logged with buyer = ''
-    (empty), and analogously for sellers. When neither field is empty,
-    the trade is between two named bots and the aggressor is ambiguous;
-    we default to 'unknown' for those.
+    Two scenarios:
+
+    1. **Activity log tradeHistory** (synthetic + real): buyer/seller
+       fields populated. Per IMC convention, the empty side is the
+       aggressor; e.g. ``buyer="" seller="BOT_X"`` -> market buyer
+       aggressed BOT_X -> ``buy``.
+
+    2. **IMC market trades CSV** (``trades_round_*_day_*.csv``): the
+       buyer/seller fields are typically all blank because the book is
+       anonymized for the player. Returns ``unknown`` here; callers
+       should use ``classify_side_by_fv`` for those rows.
     """
     buyer = trade.buyer or ""
     seller = trade.seller or ""
     if buyer == "" and seller != "":
-        return "buy"  # market buyer aggressed against the named seller
+        return "buy"
     if seller == "" and buyer != "":
-        return "sell"  # market seller aggressed against the named buyer
+        return "sell"
     if buyer != "" and seller != "":
-        # Both sides named: ambiguous. Common in synthetic logs.
         return "unknown"
+    return "unknown"
+
+
+def classify_side_by_fv(trade: TradeRow, server_fv: float) -> str:
+    """Classify trade direction by comparing print price to server FV.
+
+    Convention: a trade printed *above* server FV was a market buyer
+    aggressing into the ask wall; a trade *below* server FV was a
+    market seller hitting the bid wall. Trades exactly at FV are
+    ambiguous and returned as 'unknown'.
+
+    Used when buyer/seller fields are anonymized (the IMC market-trades
+    CSV format).
+    """
+    if trade.price > server_fv:
+        return "buy"
+    if trade.price < server_fv:
+        return "sell"
     return "unknown"
 
 
