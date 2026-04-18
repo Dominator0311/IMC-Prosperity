@@ -469,6 +469,59 @@ def _round1_ladder_base() -> EngineConfig:
     )
 
 
+def _round1_pepper_candidate_base(
+    pepper_strategy_name: str, *, max_aggressive_size: int = 20, quote_size: int = 5,
+) -> EngineConfig:
+    """Shared base for the 5 new PEPPER research-strategy uploads.
+
+    Keeps K2's winning ASH ladder unchanged so ASH PnL contribution is
+    held constant across the 5 PEPPER candidates.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            strategy_name="ash_ladder",
+            fair_value_method="weighted_mid",
+            fair_value_fallbacks=("wall_mid", "mid"),
+            maker_edge=2.5,
+            taker_edge=0.5,
+            flatten_threshold=0.7,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            strategy_name=pepper_strategy_name,
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            max_aggressive_size=max_aggressive_size,
+            quote_size=quote_size,
+            history_length=32,
+        ),
+    )
+
+
+def round1_pepper_passive_maker_engine_config() -> EngineConfig:
+    """PEPPER passive-maker: inside-spread maker with asymmetric long bias."""
+    return _round1_pepper_candidate_base("pepper_passive_maker")
+
+
+def round1_pepper_drift_asymmetric_engine_config() -> EngineConfig:
+    """PEPPER Fodra-Labadie asymmetric maker with reversal guard."""
+    return _round1_pepper_candidate_base("pepper_drift_asymmetric")
+
+
+def round1_pepper_imbalance_timer_engine_config() -> EngineConfig:
+    """PEPPER imbalance-timer: drift carry + OFI-gated adds/trims."""
+    return _round1_pepper_candidate_base("pepper_imbalance_timer")
+
+
+def round1_pepper_flow_overlay_engine_config() -> EngineConfig:
+    """PEPPER flow-overlay: drift carry + trade-tape EWMA bias."""
+    return _round1_pepper_candidate_base("pepper_flow_overlay")
+
+
+def round1_pepper_passive_opener_engine_config() -> EngineConfig:
+    """PEPPER passive-opener: passive-first opening + drift-maker carry."""
+    return _round1_pepper_candidate_base("pepper_passive_opener")
+
+
 def round1_ash_deep_k1_engine_config() -> EngineConfig:
     """Phase-K K1 — J2_heavier (weights 4/1/1 on 2.5/5/8)."""
     return _round1_ladder_base()
@@ -517,6 +570,73 @@ def round1_ash_deep_l5b_engine_config() -> EngineConfig:
 def round1_ash_deep_l6_engine_config() -> EngineConfig:
     """Phase-L L6 — K2_lighter (weights 5/2/2)."""
     return _round1_ladder_base()
+
+
+def round1_combined_v5micro_l1_engine_config() -> EngineConfig:
+    """Combined: v5_micro PEPPER (guarded carry + micro overlay) + L1 ASH ladder (2.5/3.5/5).
+
+    PEPPER leg: pepper_core_long with the v5_micro params (best official
+    PEPPER +7,315). Uses the same product config shape as the standalone
+    v5_micro bundle.
+
+    ASH leg: ash_ladder (L1 winning config, official +1,786). Uses
+    weighted_mid fair value, matching the Phase-J/K/L ladder family.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            strategy_name="ash_ladder",
+            fair_value_method="weighted_mid",
+            fair_value_fallbacks=("wall_mid", "mid"),
+            maker_edge=2.5,
+            taker_edge=0.5,
+            flatten_threshold=0.7,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            strategy_name="pepper_core_long",
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            taker_edge=2.0,
+            maker_edge=1.0,
+            quote_size=10,
+            max_aggressive_size=20,
+            inventory_skew=2.0,
+            flatten_threshold=0.7,
+            history_length=32,
+        ),
+    )
+
+
+def round1_combined_v6_engine_config() -> EngineConfig:
+    """Combined v6: passive-opening PEPPER + L1 ASH ladder (2.5/3.5/5).
+
+    PEPPER leg: pepper_v6_combined with passive opening, core-long
+    overlay, inside-spread maker cycling, and drift asymmetry.
+
+    ASH leg: ash_ladder (L1 winning config, official +1,786). Same as
+    the v5micro+L1 bundle.
+    """
+    return _round1_engine_with(
+        ASH_COATED_OSMIUM=dict(
+            strategy_name="ash_ladder",
+            fair_value_method="weighted_mid",
+            fair_value_fallbacks=("wall_mid", "mid"),
+            maker_edge=2.5,
+            taker_edge=0.5,
+            flatten_threshold=0.7,
+        ),
+        INTARIAN_PEPPER_ROOT=dict(
+            strategy_name="pepper_v6_combined",
+            fair_value_method="linear_drift",
+            fair_value_fallbacks=("depth_mid", "hybrid_wall_micro", "mid"),
+            taker_edge=2.0,
+            maker_edge=1.0,
+            quote_size=10,
+            max_aggressive_size=20,
+            inventory_skew=2.0,
+            flatten_threshold=0.7,
+            history_length=32,
+        ),
+    )
 
 
 def round1_alt_engine_config() -> EngineConfig:
