@@ -20,6 +20,7 @@ live loop.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from src.core.types import ResidualConfig, ScannerConfig
@@ -166,15 +167,36 @@ class EngineConfig:
     products: dict[str, ProductConfig] = field(default_factory=dict)
     scanner_config: ScannerConfig = field(default_factory=ScannerConfig)
     residual_config: ResidualConfig = field(default_factory=ResidualConfig)
+    # Round-2 Market Access Fee bid (XIRECs). 0 = abstain from auction.
+    # IMC normalises negative bids to 0; we enforce that at construction.
+    # Read by Trader.bid() and surfaced once per round.
+    bid_value: int = 0
 
     def __post_init__(self) -> None:
         if self.state_version < 1:
             raise ValueError("EngineConfig.state_version must be >= 1")
         if self.max_trader_data_chars <= 0:
             raise ValueError("EngineConfig.max_trader_data_chars must be > 0")
+        if not isinstance(self.bid_value, int) or isinstance(self.bid_value, bool):
+            raise TypeError(
+                f"EngineConfig.bid_value must be int (got {type(self.bid_value).__name__})"
+            )
+        if self.bid_value < 0:
+            raise ValueError(
+                f"EngineConfig.bid_value must be >= 0 (got {self.bid_value})"
+            )
 
     def product_config(self, product: str) -> ProductConfig | None:
         return self.products.get(product)
+
+
+def with_bid_value(config: EngineConfig, bid_value: int) -> EngineConfig:
+    """Return a copy of ``config`` with ``bid_value`` overridden.
+
+    Used by the Round-2 export pipeline to inject a per-bundle MAF bid
+    without touching the underlying engine factories.
+    """
+    return dataclasses.replace(config, bid_value=bid_value)
 
 
 def default_engine_config() -> EngineConfig:
