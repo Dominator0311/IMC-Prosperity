@@ -1,176 +1,176 @@
-# P4-R2 Invest & Expand — Final Decision Memo
+# P4-R2 Invest & Expand — Final Decision Memo (v2)
 
-Authored 2026-04-19 after deep analytics pass that added MC validation,
-level-k iteration, adversarial worst-case search, and a phase diagram
-over (mean_v, std_v) of opponent field. Incorporates the IMC MAF
-consensus-fragility warning.
+**Updated 2026-04-19** after integrating the IMC Prosperity 4 community
+Discord poll signal (42 voters, closed 2026-04-18). Supersedes v1.
 
-**Bottom line**: this is a genuine strategic decision under irreducible
-uncertainty. There is no single mathematically-optimal pick without a
-belief about where the opposing field's focal mass sits. The three viable
-candidates and the belief that selects each are enumerated below.
+## TL;DR
 
----
+**Primary submission: `(r=17, s=50, v=33)`**. Weighted-meta-regret
+winner at E[PnL] = 209 954 XIREC under a Discord-informed prior mix.
+Expected VoI on this pick is only 22k — the decision is robust.
 
-## 1. What the analytical work has established with certainty
+**Backup (late-swap candidate): `(r=16, s=50, v=34)`** — near-tie on
+expected PnL but breaks any v=33 Schelling tie in our favour. Switch
+to this if we suspect a large cluster exactly at v=33.
 
-These facts are robust and do not depend on field belief:
+**Do NOT submit** `(23, 77, 0)` — dominated on every realistic prior.
 
-| Fact | Source |
-|---|---|
-| Always spend the full 100% budget | FOC on (r, s), analytically verified |
-| Given fixed v, (r, s) sits on `s = (1+r) ln(1+r)` with `r + s = 100 − v` | Inner-game FOC |
-| E[μ] has a closed-form percentile expression `≈ 0.9 − 0.8 · P(opp > v_you)` | MC validated to 0.0003 over 1 500 trials |
-| Under any focal-cluster prior, the level-k equilibrium is a single v-spike at the mode of L0 | Level-k iteration |
-| Low-v picks have HIGHER worst-case floors than high-v picks (R·S buffers μ collapse) | Adversarial search |
-| Best-response v rises ~1:1 with field mean | Phase diagram over (mean, σ) |
+## What changed between v1 and v2
 
-## 2. What is irreducibly uncertain
+1. Integrated the IMC community Discord poll with 42 voters:
+   - 17% at v=0 (coaster cluster)
+   - 21% at v=90-100% (*critical upper tail, spite/trolling hypothesis*)
+   - 34% at v=10-40% (rational middle)
+2. Added three Discord-informed priors: `discord_poll_raw_p4r2`,
+   `discord_poll_discounted_p4r2`, `discord_realistic_blend_p4r2`.
+3. Explicit subjective prior weights (`default_subjective_weights()`).
+4. Weighted meta-regret replaces minimax as the primary criterion.
+5. VoI analysis quantifies how much future signal would improve the pick.
+6. Confirmed gabsens P2-R3 Excel is NOT relevant (different mechanic).
 
-The opponent v-distribution. Without it, no single candidate is optimal
-across all priors. The following are the plausible field-composition
-beliefs and the allocation each selects:
+## Weighted meta-regret top 7 (all on the v ∈ [33, 41] plateau)
 
-| Field-composition belief | Best response |
-|---|---|
-| Field coasts (>80% at v=0) | (23, 77, 0) |
-| MAF-cluster dominated (35%+ at v=5–12) | (21, 67, 12) — leapfrog the cluster |
-| Naive-thirds dominated (60% at v=33) | (17, 50, 33) — tie in |
-| Blended (sharp 37%, anchors at 33/40/50, ~10-20% coast) | (15, 45, 40) |
-| Focal cluster at v=40 | (15, 45, 40) — tie in |
-| Focal cluster at v=50 (rjav1 leapfrog hypothesis) | (13, 37, 50) — tie in |
-| Speed-race (field aggressively overbids) | (23, 77, 0) — accept μ=0.1 floor, maximise R·S |
+| alloc | E[PnL] | worst PnL | worst prior |
+|---|---:|---:|---|
+| **(17, 50, 33)** | **209 954** | -6 160 | all_half_schelling |
+| (16, 50, 34) | 207 091 | -7 027 | all_half_schelling |
+| (16, 49, 35) | 204 182 | -7 887 | all_half_schelling |
+| (16, 48, 36) | 201 181 | -8 746 | all_half_schelling |
+| (16, 47, 37) | 198 089 | -9 606 | all_half_schelling |
+| (15, 45, 40) | 195 223 | -12 152 | all_half_schelling |
+| (15, 44, 41) | 193 943 | -12 993 | all_half_schelling |
 
-Under the minimax-regret rule (hedge against worst deviation), the
-parameter-plateau answer is v ∈ {35, 36, 37}:
+The weighted optimum shifted **down** from (16, 48, 36) in v1 to
+(17, 50, 33) in v2. The Discord-informed blends (55% cumulative
+weight) select v=33 as BR because the naive-thirds cluster is a
+strong Schelling point that tying into wins on μ without extra v-cost.
 
-| Candidate | Mean PnL | Worst PnL | Max regret |
-|---|---|---|---|
-| (16, 49, 35) | 203 728 | -7 887 | 289 076 |
-| (16, 48, 36) | 204 940 | -8 746 | 296 811 |
-| (16, 47, 37) | 200 482 | -9 606 | 304 547 |
+## Per-prior best response
 
-## 3. IMC MAF consensus-fragility warning — how we priced it in
+| Prior | BR alloc | μ_exp | BR net PnL |
+|---|---|---:|---:|
+| discord_poll_raw | (18, 58, 24) | 0.46 | 188 305 |
+| discord_poll_mild_discount (30%) | (16, 49, 35) | 0.59 | 200 322 |
+| discord_poll_heavy_discount (70%) | (15, 46, 39) | 0.71 | 223 300 |
+| discord_blend_35pct_engage | (17, 50, 33) | 0.57 | 200 792 |
+| discord_blend_50pct_engage | (17, 50, 33) | 0.57 | 201 757 |
+| discord_blend_20pct_engage | (17, 50, 33) | 0.57 | 199 828 |
+| rjav1_blend_ensemble | (15, 45, 40) | 0.75 | 234 137 |
+| maf_cluster_v5_heavy | (22, 70, 8)  | 0.55 | 316 656 |
+| maf_cluster_v27_meme | (17, 50, 33) | 0.62 | 221 980 |
+| all_coast | (23, 77, 0) | 0.90 | 618 097 |
 
-The warning: if many teams converge on the same rational pick (e.g.
-v=5), the median shifts upward and the nominal pick lands in the bottom
-rank tier. Suggested response: overshoot the consensus cluster by
-5–15 pct.
+## Value of information
 
-Integrating this into our prior library (`maf_v5_cluster`,
-`maf_v12_cluster`, `maf_realistic_blend`) produces this nuance:
+| committed pick | E[VoI] | implication |
+|---|---:|---|
+| (17, 50, 33) | 22 543 | 11% of E[PnL]: robust |
+| (16, 50, 34) | 25 406 | slightly more regret |
+| (16, 49, 35) | 28 316 | more regret |
 
-- **If the MAF cluster is alone (field dominated by v=5–12)**, BR = v=8
-  to v=12. A minimal overshoot is enough.
-- **If the MAF cluster coexists with anchor clusters at v=33/40/50**
-  (the realistic blend scenario), BR = v=12. Overshooting the MAF
-  cluster by 5 is enough because the high-v anchors block any further
-  gains — playing v=40 gives you μ=0.69 but the (r, s) budget loss
-  outweighs the μ gain.
-- **The MAF warning's "v=20–25" suggestion is conservative but not
-  optimal** under our modeled blends. It hedges against a pure MAF
-  field but leaves money on the table if the field is actually mixed.
+Biggest VoI for (17, 50, 33) concentrated in tail priors:
+- Knowing `all_coast` true → switch to (23, 77, 0) for +273k (weight 5%)
+- Knowing `all_half_schelling` true → switch to (13, 37, 50) for +222k (weight 2%)
+- Knowing `maf_v5_heavy` true → switch to (22, 70, 8) for +60k (weight 5%)
 
-Critical insight: **overshooting too far is as bad as undershooting**.
-Phase diagram shows every +1 v above BR costs ~1 k PnL. Every -1 v
-below a cluster costs ~10 k.
+The pick is DOMINANT under the discord_blend family (zero VoI) which
+hold 45% of weight. Only tail scenarios would flip the pick; we
+consider those unlikely.
 
-## 4. The three viable submission candidates
+## Execution plan
 
-### Tier 1 — Minimax-regret plateau pick (RECOMMENDED DEFAULT)
+1. **T–24h (now)**: submit `(r=17, s=50, v=33)`.
+2. **T–6h**: check late Discord/X signal or leaderboard access. If
+   the v≥90 tail hypothesis gets corroboration (multiple public v=95
+   commits), update prior and rerun:
+   ```bash
+   PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand_final --n-opponents 4500
+   ```
+3. **T–1h**: final look. Hold v=33 unless signal decisively moved the
+   field mean above 40.
+4. **At lock**: Tier 1 submission, unless a signal has flipped it.
 
-**Allocation: (r=16, s=48, v=36)**
-
-Why: sits at the "parameter plateau" — the point of lowest
-maximum-regret across 18 plausible priors. Mean PnL 205 k. Only
-catastrophic (worst PnL -9 k) under extreme priors (all field at v=50,
-or a leapfrog adversary specifically targeting v=36). None of those
-are realistic. Under realistic blends yields 195–240 k.
-
-### Tier 2 — Downside-protection pick
-
-**Allocation: (r=13, s=37, v=50)**
-
-Why: highest adversarial-worst-case PnL (-20 k vs -7 k for Tier 1 is
-actually WORSE on the adversarial library, but against the
-*realistic* library rjav1 foodio's pick has a +50 k floor). Best
-choice if you believe a v=50 focal cluster exists (rjav1's hypothesis).
-Mean PnL 183 k across all priors — 20 k lower than Tier 1.
-
-### Tier 3 — MAF-fragility hedge
-
-**Allocation: (r=21, s=67, v=12)**
-
-Why: optimal if we believe the MAF consensus-fragility scenario is
-the dominant reality. Wins under MAF-realistic blend (~245 k) by
-more than Tier 1 wins there (~215 k). BUT: under any prior with
-significant mass above v=20, Tier 3 gets crushed (PnL drops to 110 k
-or lower). Asymmetric bet.
-
-## 5. My recommendation
-
-**Submit (r=16, s=48, v=36) as a primary.**
-
-Reasoning:
-1. It is the literal minimax-regret winner across the full prior library.
-2. It sits exactly at the "parameter plateau" — insensitive to
-   ±5 pct-point shifts in field mean.
-3. Under all realistic blends (rjav1_blend, MAF-realistic, trimodal):
-   PnL band of 205–245 k. Never catastrophic.
-4. Matches xpablolo's independently-derived minimax answer to within
-   one integer percent (they got v=34; v=36 is two ticks above,
-   consistent with the MAF-cluster consideration added to our analysis).
-5. Best worst-case among the three tiers on *realistic* priors (not
-   the adversarial-leapfrog library).
-
-**Hold Tier 2 (13, 37, 50) in reserve** for late-stage resubmission if:
-- Signal leaks during R2 suggest v=50 is a dominant focal cluster
-- The sharp-optimiser fraction is lower than estimated (more field
-  at v=50, fewer at v=40)
-
-**Only switch to Tier 3 (21, 67, 12)** if you have independent signal
-(Discord, leaderboard) that ≥40% of the field is clustered at v=5–15.
-This is an asymmetric bet; the upside is modest and the downside is
-severe.
-
-## 6. What does NOT work
-
-- **(23, 77, 0) — the "naive FOC at μ=0.9" answer**. Dominated on
-  every realistic prior (143 k vs 200 k+). Only wins if >80% of the
-  field coasts, which is not what the MAF evidence suggests.
-- **(22, 73, 5) — the "FOC + small insurance" answer**. MAF analysis
-  confirms the warning was right: this lands squarely in the
-  semi-naive cluster, gets bottom-rank μ, yields only 130 k on
-  realistic blends.
-- **Any pick with v > 60**. Phase diagram and mean-field analysis
-  show field mean is very unlikely to exceed 40 (per rjav1's scrape);
-  v=60+ wastes budget buying rank you already have.
-
-## 7. Execution plan
-
-1. **T–24h**: Submit Tier 1 `(r=16, s=48, v=36)`.
-2. **T–6h**: Audit any R2 leaderboard drift / Discord signal.
-   Re-run `src.scripts.run_manual_invest_expand_deep` with updated
-   empirical prior if sample data available.
-3. **T–1h**: Final look. Switch to Tier 2 if cluster-at-50 signal is
-   strong. Stay on Tier 1 otherwise. **Do not switch to Tier 3 at
-   this stage** — it's a pre-commitment bet, not a late-pivot.
-4. **At lock**: Tier 1 unless signal has flipped our prior decisively.
-
-## 8. Running the tooling
+## Running the analytics
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m pytest tests/test_manual_invest_expand.py -v
-PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand --n-opponents 4500
+PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand        --n-opponents 4500
 PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand_sensitivity
 PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand_deep
+PYTHONPATH=. .venv/bin/python -m src.scripts.run_manual_invest_expand_final  --n-opponents 4500
 ```
 
-## 9. What could change this recommendation
+## Files (branch `round2-manual-challenge`)
 
-- Leaderboard scraping yields an empirical v-histogram during R2
-  (rjav1's approach). Re-run `best_allocation_under_prior` with
-  `empirical_from_samples(scraped)` as the prior.
-- An admin clarification changes the tie rule.
-- The MAX_SPEED_INVESTMENT cap is confirmed at a non-trivial value
-  (s-h-a-n-i-l hard-codes 88). Re-run with v_grid=[0..88].
+```
+src/manual_rounds/
+  invest_expand.py                     core math, 300 LOC
+  invest_expand_priors.py              17 priors incl. Discord-aware
+  invest_expand_equilibrium.py         QRE + regret table
+  invest_expand_deep.py                MC, level-k, adversarial, phase diagram
+  invest_expand_decision.py            weighted meta-regret + VoI
+src/scripts/
+  run_manual_invest_expand.py          base runner
+  run_manual_invest_expand_sensitivity.py
+  run_manual_invest_expand_deep.py
+  run_manual_invest_expand_final.py    final decision runner
+tests/test_manual_invest_expand.py     52 tests, all passing
+docs/manual_round_2/
+  HANDOFF_CONTEXT.md                   original session brief
+  DECISION_MEMO.md                     this file
+Manual Round 2/                        untracked user-supplied inputs
+  discord sunday.txt                   1935-line community chat log
+  round 3 manual.xlsx                  gabsens P2-R3 sheet (not relevant)
+```
+
+## Subjective weights (commit explicit belief)
+
+Dated **2026-04-19**, in `default_subjective_weights()`:
+
+```
+discord_poll_raw                   0.05   # raw poll probably biased
+discord_poll_mild_discount         0.10   # small troll discount
+discord_poll_heavy_discount        0.05   # heavy discount, less plausible
+discord_blend_35pct_engage         0.25   # primary realistic guess
+discord_blend_50pct_engage         0.10
+discord_blend_20pct_engage         0.10
+rjav1_blend_ensemble               0.10   # pre-Discord ensemble
+maf_cluster_v5_heavy               0.05   # MAF fragility scenario
+maf_cluster_v27_meme               0.05   # "speed=27" Discord meme
+all_thirds_schelling               0.03   # Schelling worst-case
+all_half_schelling                 0.02   # Schelling worst-case
+all_coast                          0.05   # coasters Schelling
+uniform_flat                       0.05   # no-info baseline
+```
+
+Swap to taste and re-run to sensitivity-test.
+
+## What could still change the pick
+
+1. **Live R2 leaderboard data** via API probing (in progress).
+2. **Confirmed UI slider default value** — if defaults at v=50 or
+   v=33, expect Schelling cluster at that value.
+3. **Late Discord convergent public consensus at specific v != 33**.
+4. **Official admin clarification** on tie-rule.
+
+## Discord signal — critical analysis (not just noise)
+
+**Valid signal** (high confidence):
+- 17% at v=0 — consistent with quoted "73% got 0 last round"
+- 21% at v=90-100% — from spite voters + "100 speed to grief coasters"
+- Cluster at v=20-40 (34% of poll)
+- "Speed=27" meme — multiple explicit mentions create Schelling
+
+**Noise / discounted**:
+- Self-selected Discord sample (42 ≠ 4500 field)
+- "69%", "69420%" — obvious trolling
+- "51% because math" — flawed reasoning
+- "I'll grief" posturing probably partially theatre
+
+## Do NOT submit
+
+- `(23, 77, 0)` — dominated, 140k weighted mean
+- `(22, 73, 5)` — MAF-fragility trap, 130k weighted mean
+- `(13, 37, 50)` unless cluster-at-50 signal firms up — 181k weighted
+  mean, 27k below Tier 1
+- `v > 60` — waste of budget

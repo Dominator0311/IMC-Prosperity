@@ -270,6 +270,101 @@ def leapfrog_adversary(beat_v: int) -> VPrior:
     return _normalize_pmf(weights)
 
 
+def discord_poll_raw_p4r2() -> VPrior:
+    """Empirical prior from the IMC Prosperity 4 R2 community Discord
+    poll on speed % (42 voters, closed 2026-04-18,
+    poll-maker.com/results5761782xa5694421-168).
+
+    Buckets:
+      - 0%:      17%      - 1-10%:    7% (uniform v in {2..10})
+      - 1%:       5%      - 10-20%:  12% (uniform v in {11..20})
+      - 20-30%:  10%      - 30-40%:  12%
+      - 40-50%:   2%      - 50-60%:   5%
+      - 60-70%:   2%      - 70-80%:   2%
+      - 80-90%:   5%      - 90-100%: 21%  <-- critical upper tail
+
+    42 voters is a small, self-selected sample. Engaged / spite / troll
+    players are over-represented. Use as *directional signal*, not truth.
+    """
+    weights = [0.0] * (MAX_PCT + 1)
+    weights[0] = 0.17
+    weights[1] = 0.05
+    for v in range(2, 11):
+        weights[v] = 0.07 / 9
+    for v in range(11, 21):
+        weights[v] = 0.12 / 10
+    for v in range(21, 31):
+        weights[v] = 0.10 / 10
+    for v in range(31, 41):
+        weights[v] = 0.12 / 10
+    for v in range(41, 51):
+        weights[v] = 0.02 / 10
+    for v in range(51, 61):
+        weights[v] = 0.05 / 10
+    for v in range(61, 71):
+        weights[v] = 0.02 / 10
+    for v in range(71, 81):
+        weights[v] = 0.02 / 10
+    for v in range(81, 91):
+        weights[v] = 0.05 / 10
+    for v in range(91, 101):
+        weights[v] = 0.21 / 10
+    return _normalize_pmf(weights)
+
+
+def discord_poll_discounted_p4r2(troll_discount: float = 0.5) -> VPrior:
+    """Discord poll with partial discount on the 90-100% tail
+    (presumed trolling / spite voting), redistributed into v=20..40.
+
+    ``troll_discount = 0.0`` preserves raw poll; ``1.0`` zeroes tail.
+    """
+    if not (0 <= troll_discount <= 1):
+        raise ValueError(f"troll_discount={troll_discount} outside [0, 1]")
+    raw = list(discord_poll_raw_p4r2())
+    upper_tail_mass = sum(raw[91:101])
+    removed = upper_tail_mass * troll_discount
+    for v in range(91, 101):
+        raw[v] *= (1 - troll_discount)
+    add_each = removed / 21  # v=20..40 inclusive
+    for v in range(20, 41):
+        raw[v] += add_each
+    return _normalize_pmf(raw)
+
+
+def discord_realistic_blend_p4r2(
+    discord_engagement: float = 0.35,
+    troll_discount: float = 0.4,
+) -> VPrior:
+    """Realistic P4-R2 blend: ``discord_engagement`` fraction of field
+    follows (troll-discounted) Discord poll; rest plays a naive-field
+    distribution covering the unengaged majority.
+
+    Naive sub-blend (on the (1 - discord_engagement) population):
+      - 15% at v=0 (coasters)      - 25% at v=33 (naive thirds)
+      - 20% at v=50 (halve-it)     - 15% uniform on v=25..30
+      - 15% uniform on v=40..45    - 10% uniform on v=0..100
+    """
+    if not (0 <= discord_engagement <= 1):
+        raise ValueError(f"discord_engagement={discord_engagement} outside [0, 1]")
+    discord_part = discord_poll_discounted_p4r2(troll_discount)
+    naive = [0.0] * (MAX_PCT + 1)
+    naive[0] = 0.15
+    naive[33] = 0.25
+    naive[50] = 0.20
+    for v in range(25, 31):
+        naive[v] += 0.15 / 6
+    for v in range(40, 46):
+        naive[v] += 0.15 / 6
+    for v in range(MAX_PCT + 1):
+        naive[v] += 0.10 / (MAX_PCT + 1)
+    naive_part = _normalize_pmf(naive)
+    combined = [
+        discord_engagement * d + (1 - discord_engagement) * n
+        for d, n in zip(discord_part, naive_part)
+    ]
+    return _normalize_pmf(combined)
+
+
 def empirical_from_samples(samples: Iterable[int]) -> VPrior:
     """Empirical PMF from integer samples. Zero-pads if some v unseen."""
     counts = [0] * (MAX_PCT + 1)

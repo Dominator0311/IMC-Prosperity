@@ -30,9 +30,16 @@ from src.manual_rounds.invest_expand_deep import (
     level_k_iteration,
     monte_carlo_mu,
 )
+from src.manual_rounds.invest_expand_decision import (
+    value_of_information,
+    weighted_meta_regret,
+)
 from src.manual_rounds.invest_expand_priors import (
     bimodal_split_vs_zero,
     consensus_cluster,
+    discord_poll_discounted_p4r2,
+    discord_poll_raw_p4r2,
+    discord_realistic_blend_p4r2,
     empirical_from_samples,
     leapfrog_adversary,
     mixture,
@@ -465,3 +472,102 @@ class TestMAFPriors:
         assert p[35] + p[36] == pytest.approx(1.0)
         assert p[34] == 0.0
         assert p[33] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Discord-poll priors (live empirical signal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDiscordPriors:
+    def test_poll_raw_matches_known_buckets(self):
+        p = discord_poll_raw_p4r2()
+        assert p[0] == pytest.approx(0.17)
+        assert p[1] == pytest.approx(0.05)
+        # 21% total in 91-100
+        assert sum(p[91:101]) == pytest.approx(0.21)
+        # sum to 1
+        assert sum(p) == pytest.approx(1.0)
+
+    def test_troll_discount_redistributes_from_tail_to_middle(self):
+        raw = discord_poll_raw_p4r2()
+        half = discord_poll_discounted_p4r2(0.5)
+        # Upper tail halved
+        assert sum(half[91:101]) == pytest.approx(sum(raw[91:101]) * 0.5)
+        # v=20..40 should have strictly more mass
+        assert sum(half[20:41]) > sum(raw[20:41])
+        # still sums to 1
+        assert sum(half) == pytest.approx(1.0)
+
+    def test_realistic_blend_interpolates(self):
+        # engagement=0 -> pure naive, engagement=1 -> pure discord
+        discord = discord_realistic_blend_p4r2(discord_engagement=1.0)
+        naive = discord_realistic_blend_p4r2(discord_engagement=0.0)
+        mid = discord_realistic_blend_p4r2(discord_engagement=0.5)
+        # Mid mass at v=0 should be between naive and discord
+        assert min(discord[0], naive[0]) <= mid[0] <= max(discord[0], naive[0])
+
+    def test_engagement_out_of_range_rejects(self):
+        with pytest.raises(ValueError):
+            discord_realistic_blend_p4r2(discord_engagement=1.5)
+
+
+# ---------------------------------------------------------------------------
+# Weighted meta-regret + VoI
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDecisionTools:
+    def test_weighted_meta_regret_collapses_correctly(self):
+        candidates = [Allocation(r=17, s=50, v=33), Allocation(r=23, s=77, v=0)]
+        priors = {"thirds": naive_thirds(), "coast": naive_ignore_speed()}
+        weights = {"thirds": 0.5, "coast": 0.5}
+        rows = weighted_meta_regret(candidates, priors, weights, n_opponents=4500)
+        # Under 50/50 weighting of thirds and coast:
+        # - (17,50,33) ties into the v=33 cluster on thirds (mu=0.9 => 344k)
+        #   and gets mu=0.9 on coast too (no one above v=33 => 344k).
+        # - (23,77,0) ties into v=0 cluster on coast (mu=0.9 => 618k)
+        #   but sits at the bottom on thirds (mu=0.1 => 24k).
+        # Averages: (17,50,33) = (344+344)/2 = 344k, (23,77,0) = (618+24)/2 = 321k.
+        # So (17,50,33) wins under equal weighting.
+        assert rows[0].allocation.v == 33
+        assert rows[0].weighted_mean_pnl > rows[1].weighted_mean_pnl
+        assert rows[0].weighted_mean_pnl == pytest.approx(344_558, rel=0.01)
+        assert rows[1].weighted_mean_pnl == pytest.approx(321_165, rel=0.01)
+
+    def test_weighted_meta_regret_rejects_mismatched_keys(self):
+        with pytest.raises(ValueError):
+            weighted_meta_regret(
+                [Allocation(r=17, s=50, v=33)],
+                {"a": naive_thirds()},
+                {"b": 1.0},
+                n_opponents=4500,
+            )
+
+    def test_voi_is_non_negative_for_any_commitment(self):
+        priors = {"thirds": naive_thirds(), "coast": naive_ignore_speed()}
+        weights = {"thirds": 0.5, "coast": 0.5}
+        voi = value_of_information(
+            Allocation(r=17, s=50, v=33), priors, weights, n_opponents=4500
+        )
+        assert voi.expected_voi >= 0
+        # For a mis-matched committed pick, VoI is strictly positive
+        # (we'd gain by switching in at least one revelation).
+        voi_bad = value_of_information(
+            Allocation(r=0, s=0, v=0), priors, weights, n_opponents=4500
+        )
+        assert voi_bad.expected_voi > voi.expected_voi
+
+    def test_voi_zero_when_committed_is_best_under_singleton(self):
+        # If prior library has only one element and we commit to its best,
+        # VoI is exactly zero.
+        from src.manual_rounds.invest_expand import best_allocation_under_prior
+
+        prior = discord_realistic_blend_p4r2(0.35, 0.4)
+        rep, _ = best_allocation_under_prior(prior, n_opponents=4500)
+        voi = value_of_information(
+            rep.allocation, {"p": prior}, {"p": 1.0}, n_opponents=4500
+        )
+        assert voi.expected_voi == pytest.approx(0, abs=1e-6)
