@@ -85,10 +85,12 @@ class Trader:
 
     # ---------------------------------------------------------- contract
 
-    # Some Prosperity rounds require a ``bid()`` method on Trader.
-    # Keep this stub so contract changes do not break submissions.
+    # Round-2 Market Access Fee. The Prosperity container reads this
+    # once at the start of the round; ignored in earlier rounds and in
+    # local test runs. Value is sourced from EngineConfig.bid_value so
+    # each export bundle ships with its own auction bid.
     def bid(self) -> int:
-        return 15
+        return self.config.bid_value
 
     def run(self, state: TradingState) -> tuple[dict[str, list[Order]], int, str]:
         """Entry point called by the Prosperity container.

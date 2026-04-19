@@ -154,8 +154,13 @@ def _format_product_summary(config: EngineConfig) -> str:
     return "\n".join(lines)
 
 
-def _build_variant_banner(variant: str, info: dict[str, object], commit: str) -> str:
+def _build_variant_banner(
+    variant: str, info: dict[str, object], commit: str, *, bid_value: int = 0
+) -> str:
     config = info["factory"]()
+    bid_line = (
+        f"# MAF bid : {bid_value} XIRECs (Round-2 only; ignored in earlier rounds)\n"
+    )
     return (
         "# " + "=" * 72 + "\n"
         f"# ROUND-1 UPLOAD VARIANT: {variant}\n"
@@ -163,20 +168,34 @@ def _build_variant_banner(variant: str, info: dict[str, object], commit: str) ->
         f"# Purpose : {info['purpose']}\n"
         f"# Factory : src.core.config.{info['factory_name']}\n"
         f"# Built   : {datetime.now(UTC).isoformat()} (commit {commit})\n"
+        f"{bid_line}"
         "# Embedded product configs:\n"
         f"{_format_product_summary(config)}\n"
         "# " + "=" * 72 + "\n"
     )
 
 
-def _patch_default_config_call(source: str, factory_name: str) -> str:
+def _patch_default_config_call(
+    source: str, factory_name: str, *, bid_value: int = 0
+) -> str:
     if _DEFAULT_FACTORY_CALL not in source:
         raise RuntimeError(
             f"Could not find {_DEFAULT_FACTORY_CALL!r} in the bundled source. "
             "The Trader.__init__ default config call may have changed; "
             "update _DEFAULT_FACTORY_CALL in this script accordingly."
         )
-    replacement = f"self.config = config or {factory_name}()"
+    if bid_value < 0:
+        raise ValueError(f"bid_value must be >= 0 (got {bid_value})")
+    if bid_value:
+        # Round-2 MAF bundles wrap the factory in with_bid_value(...) so
+        # the embedded config carries the per-variant auction bid.
+        replacement = (
+            f"self.config = config or with_bid_value({factory_name}(), {bid_value})"
+        )
+    else:
+        # Default path matches the Round-1 bundle shape exactly so the
+        # already-shipped fingerprints remain reproducible.
+        replacement = f"self.config = config or {factory_name}()"
     patched, count = _replace_once(source, _DEFAULT_FACTORY_CALL, replacement)
     if count != 1:
         raise RuntimeError(
@@ -195,11 +214,15 @@ def _output_path_for(variant: str, *, out_dir: Path) -> Path:
     return out_dir / f"trader_round1_{variant}.py"
 
 
-def _build_variant_source(variant: str, info: dict[str, object]) -> str:
+def _build_variant_source(
+    variant: str, info: dict[str, object], *, bid_value: int = 0
+) -> str:
     options = ExportOptions(datamodel_mode="platform")
     bundle = build_submission_source(options)
-    patched = _patch_default_config_call(bundle.source, info["factory_name"])
-    banner = _build_variant_banner(variant, info, _git_commit())
+    patched = _patch_default_config_call(
+        bundle.source, info["factory_name"], bid_value=bid_value
+    )
+    banner = _build_variant_banner(variant, info, _git_commit(), bid_value=bid_value)
     # Insert banner right after the auto-generated header (3 leading lines).
     lines = patched.splitlines(keepends=False)
     # The exporter's header is the first part block; banner immediately
@@ -215,17 +238,28 @@ def _build_variant_source(variant: str, info: dict[str, object]) -> str:
     return "\n".join(new_lines) + "\n"
 
 
-def export_variant(variant: str, *, out_dir: Path = _DEFAULT_OUT_DIR) -> Path:
+def export_variant(
+    variant: str, *, out_dir: Path = _DEFAULT_OUT_DIR, bid_value: int = 0
+) -> Path:
     if variant not in _VARIANTS:
         raise SystemExit(
             f"Unknown variant {variant!r}. Choose from {sorted(_VARIANTS)}."
         )
     info = _VARIANTS[variant]
     out_dir.mkdir(parents=True, exist_ok=True)
-    source = _build_variant_source(variant, info)
+    source = _build_variant_source(variant, info, bid_value=bid_value)
     output_path = _output_path_for(variant, out_dir=out_dir)
     output_path.write_text(source, encoding="utf-8")
     return output_path
+
+
+def _bid_value_arg(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"--bid must be >= 0 (IMC normalises negatives to 0; got {parsed})"
+        )
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,14 +271,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Which variant to export (default: all three).",
     )
     parser.add_argument("--out-dir", type=Path, default=_DEFAULT_OUT_DIR)
+    parser.add_argument(
+        "--bid",
+        type=_bid_value_arg,
+        default=0,
+        help=(
+            "Round-2 Market Access Fee bid (XIRECs) embedded in the bundle. "
+            "0 (default) abstains from the auction; matches the Round-1 "
+            "bundle shape exactly so existing fingerprints stay reproducible."
+        ),
+    )
     args = parser.parse_args(argv)
 
     targets = list(_VARIANTS) if args.variant == "all" else [args.variant]
     for variant in targets:
-        path = export_variant(variant, out_dir=args.out_dir)
+        path = export_variant(variant, out_dir=args.out_dir, bid_value=args.bid)
         size_kb = path.stat().st_size / 1024
         rel = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
-        print(f"[{variant}] wrote {rel} ({size_kb:.1f} KB)")
+        print(f"[{variant}] wrote {rel} ({size_kb:.1f} KB, bid={args.bid})")
     return 0
 
 
