@@ -2,19 +2,20 @@
 
 Composition of Stage A-D primitives:
 - ConversionLayer (D): signed break-even, batched stockpile, regime flags
-- PortfolioContext (B): read local + remote state
+- PortfolioContext (B): read local book + remote quote state
 - PortfolioRiskManager (B): conversion tracking
 - SignalBus (C): emit / consume the external-signal regime flag
 
 Engine is small — the heavy math is in conversions.layer. Responsibilities:
-- Fetch the local book + remote quote + external signal from PortfolioContext
+- Fetch the local book + remote quote from PortfolioSnapshot
+- Read external-signal value from SignalBus (emitted upstream)
 - Detect arb edge via signed break-even
 - Decide batch size via stockpile optimizer (3× conv_cap_per_tick)
 - Switch to accumulation mode on `squeeze` regime, offload on `glut`
-- Return (orders, conversions, tags)
+- Return EngineStepResult(orders, conversions, tags)
 
 Note: Prosperity separates orders from conversions. This engine returns
-both — caller integrates them into the trader's output.
+both — the orchestrator sums conversions across engines before persisting.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from src.conversions.layer import (
     sell_local_break_even,
     target_batch_size,
 )
+from src.core.primitives.engine_orchestrator import EngineStepResult
 from src.core.primitives.portfolio_context import PortfolioSnapshot
 from src.core.primitives.portfolio_risk import PortfolioRiskManager, ProductTag
 from src.core.primitives.signal_bus import SignalBus, SignalValue
@@ -48,7 +50,9 @@ class StatArbConfig:
     conversion_spec: ConversionSpec
     stockpile_config: StockpileConfig = field(default_factory=StockpileConfig)
 
-    # Which external-signal stream to consume from the bus.
+    # Which external-signal stream to consume from the bus. The signal
+    # must be emitted upstream (e.g., by a ConversionIntel engine that
+    # reads ConversionObservation.sunlightIndex) BEFORE this engine runs.
     external_signal_name: str | None = None
 
     # Regime detector wraps the external signal.
@@ -80,32 +84,75 @@ class StatArbEngine:
             glut_percentile=self.config.regime_glut_pct,
         )
 
+    # ====================================================== PersistableEngine
+
+    @property
+    def engine_id(self) -> str:
+        return f"stat_arb.{self.config.local_product}"
+
+    @property
+    def owned_products(self) -> frozenset[str]:
+        return frozenset({self.config.local_product})
+
+    def to_state(self) -> dict:
+        return {
+            "regime_history": list(self._regime._history),
+        }
+
+    def from_state(self, blob: dict) -> None:
+        try:
+            history = blob.get("regime_history", [])
+            if isinstance(history, list):
+                # Restore as a bounded list; trim to lookback window.
+                restored = [float(x) for x in history[-self.config.regime_lookback:]]
+                self._regime._history = restored
+        except (TypeError, ValueError):
+            # Corrupted blob: fall back to fresh detector.
+            self._regime = RegimeDetector(
+                lookback_window=self.config.regime_lookback,
+                squeeze_percentile=self.config.regime_squeeze_pct,
+                glut_percentile=self.config.regime_glut_pct,
+            )
+
+    # ====================================================== step
+
     def step(
         self,
         portfolio: PortfolioSnapshot,
         *,
-        remote: RemoteQuote,
-        external_signal_value: float | None = None,
-    ) -> tuple[list[Order], int, dict[str, ProductTag]]:
-        """Emit orders + conversion amount + tags.
+        current_tick: int | None = None,
+    ) -> EngineStepResult:
+        """Emit orders + conversion qty + tags for this tick.
 
-        Returns (orders, conversion_qty, tags):
-        - orders: local-book orders
-        - conversion_qty: signed conversion this tick (positive=import)
-        - tags: {product: ProductTag} for cross-product risk
+        Reads the remote quote from ``portfolio.remote_for(local_product)``
+        (populated by the conversion adapter) and the external-signal value
+        from ``self.bus`` (populated by an upstream conversion-intel emitter).
         """
+        _ = current_tick  # part of orchestrator contract; not used here
         snap = portfolio.for_product(self.config.local_product)
         if snap is None:
-            return [], 0, {}
+            return EngineStepResult()
+
+        remote = portfolio.remote_for(self.config.local_product)
+        if remote is None:
+            # No remote quote this tick → no arb possible, but still return tags
+            # so the risk manager sees this engine's footprint.
+            return EngineStepResult(tags=self._build_tags())
 
         pos = portfolio.position_of(self.config.local_product)
+
+        # Read external-signal value from the bus (emitted upstream). Use
+        # trusted_only=False because this is a raw observation not a
+        # statistically-validated alpha signal — validation happens here
+        # inside the regime detector via percentile.
+        external_signal_value = self._read_external_signal()
 
         # Update regime detector if we have an external signal.
         regime: str = "normal"
         if external_signal_value is not None:
             self._regime.observe(external_signal_value)
             regime = self._regime.regime(external_signal_value)
-            # Publish for downstream consumers.
+            # Publish a validated regime flag for downstream consumers.
             if self.config.external_signal_name:
                 self.bus.emit(
                     SignalValue(
@@ -128,7 +175,11 @@ class StatArbEngine:
         )
 
         if edge <= 0 and regime != "squeeze":
-            return [], conv_qty, self._build_tags()
+            return EngineStepResult(
+                orders=[],
+                conversions=conv_qty,
+                tags=self._build_tags(),
+            )
 
         # CRITICAL fix: under subsidy tariffs (import_tariff < 0) BOTH directions
         # can have positive break-even edges simultaneously. Emitting both SELL
@@ -206,7 +257,33 @@ class StatArbEngine:
                         extra,
                     ))
 
-        return orders, conv_qty, self._build_tags()
+        return EngineStepResult(
+            orders=orders,
+            conversions=conv_qty,
+            tags=self._build_tags(),
+        )
+
+    # ====================================================== helpers
+
+    def _read_external_signal(self) -> float | None:
+        """Look up the raw external-signal value on the bus.
+
+        Upstream emitters (e.g., a ConversionIntelEngine that unpacks
+        TradingState.observations.conversionObservations[product]
+        .sunlightIndex) publish under ``external_signal_name``. Raw
+        observations are emitted with ``validated=False`` by convention
+        (they aren't alpha signals), so we fetch with trusted_only=False.
+        """
+        name = self.config.external_signal_name
+        if not name:
+            return None
+        sv = self.bus.get(name, trusted_only=False)
+        if sv is None:
+            return None
+        try:
+            return float(sv.value)
+        except (TypeError, ValueError):
+            return None
 
     def _build_tags(self) -> dict[str, ProductTag]:
         return {

@@ -75,12 +75,12 @@ def test_basket_engine_no_spread_no_orders():
             timestamp=0, snapshots=snaps,
             position_limits={"BASKET": 60, "A": 100, "B": 100},
         )
-        orders, tags = engine.step(portfolio)
+        result = engine.step(portfolio)
     # After warmup with zero spread, no orders (z=0).
-    assert orders == [] or all(
-        o.quantity == 0 for o in orders
-    ), f"expected no orders on zero-spread; got {orders}"
-    assert "BASKET" in tags and tags["BASKET"].strategy_tag == "arb"
+    assert result.orders == [] or all(
+        o.quantity == 0 for o in result.orders
+    ), f"expected no orders on zero-spread; got {result.orders}"
+    assert "BASKET" in result.tags and result.tags["BASKET"].strategy_tag == "arb"
 
 
 @pytest.mark.unit
@@ -116,10 +116,12 @@ def test_basket_engine_returns_orders_on_large_spread():
         timestamp=0, snapshots=snaps,
         position_limits={"BASKET": 60, "A": 100, "B": 100},
     )
-    orders, tags = engine.step(portfolio)
+    result = engine.step(portfolio)
     # Engine should buy basket (spread negative ⇒ basket cheap).
-    basket_orders = [o for o in orders if o.symbol == "BASKET"]
-    assert any(o.quantity > 0 for o in basket_orders), f"expected long basket; got {orders}"
+    basket_orders = [o for o in result.orders if o.symbol == "BASKET"]
+    assert any(o.quantity > 0 for o in basket_orders), (
+        f"expected long basket; got {result.orders}"
+    )
 
 
 # ============================================================= Options
@@ -158,10 +160,10 @@ def test_options_engine_quotes_after_smile_warmup():
     )
     # Drive a few ticks through the engine to let smile accumulate.
     for _ in range(10):
-        orders, tags = engine.step(portfolio)
+        result = engine.step(portfolio)
     # Post-warmup, engine should be quoting at least some vouchers.
-    assert "V_10000" in tags
-    assert tags["V_10000"].strategy_tag == "arb"
+    assert "V_10000" in result.tags
+    assert result.tags["V_10000"].strategy_tag == "arb"
 
 
 @pytest.mark.unit
@@ -179,9 +181,9 @@ def test_options_engine_no_crash_on_missing_underlying():
     portfolio = build_portfolio_snapshot(
         timestamp=0, snapshots={}, position_limits={},
     )
-    orders, tags = engine.step(portfolio)
-    assert orders == []
-    assert tags == {}
+    result = engine.step(portfolio)
+    assert result.orders == []
+    assert result.tags == {}
 
 
 # ============================================================= StatArb
@@ -203,12 +205,14 @@ def test_stat_arb_emits_sell_local_on_high_bid():
     }
     portfolio = build_portfolio_snapshot(
         timestamp=0, snapshots=snaps, position_limits={"PROD": 100},
+        remote_quotes={"PROD": RemoteQuote(bid=95, ask=100)},
     )
-    remote = RemoteQuote(bid=95, ask=100)
-    orders, conv_qty, tags = engine.step(portfolio, remote=remote)
+    result = engine.step(portfolio)
     # Should sell (negative quantity) at local bid.
-    assert any(o.quantity < 0 for o in orders), f"expected sell-local; got {orders}"
-    assert "PROD" in tags and tags["PROD"].strategy_tag == "arb"
+    assert any(o.quantity < 0 for o in result.orders), (
+        f"expected sell-local; got {result.orders}"
+    )
+    assert "PROD" in result.tags and result.tags["PROD"].strategy_tag == "arb"
 
 
 @pytest.mark.unit
@@ -220,11 +224,10 @@ def test_stat_arb_conversion_size_offloads():
     snaps = {"PROD": _snap("PROD", [(100, 10)], [(101, 10)], position=50)}
     portfolio = build_portfolio_snapshot(
         timestamp=0, snapshots=snaps, position_limits={"PROD": 100},
+        remote_quotes={"PROD": RemoteQuote(bid=100, ask=100)},
     )
-    _, conv_qty, _ = engine.step(
-        portfolio, remote=RemoteQuote(bid=100, ask=100),
-    )
-    assert conv_qty == -10
+    result = engine.step(portfolio)
+    assert result.conversions == -10
 
 
 @pytest.mark.unit
@@ -235,12 +238,11 @@ def test_stat_arb_no_arb_no_orders():
     snaps = {"PROD": _snap("PROD", [(100, 10)], [(100, 10)], position=0)}
     portfolio = build_portfolio_snapshot(
         timestamp=0, snapshots=snaps, position_limits={"PROD": 100},
+        remote_quotes={"PROD": RemoteQuote(bid=100, ask=100)},
     )
-    orders, conv_qty, _ = engine.step(
-        portfolio, remote=RemoteQuote(bid=100, ask=100),
-    )
-    assert orders == []
-    assert conv_qty == 0
+    result = engine.step(portfolio)
+    assert result.orders == []
+    assert result.conversions == 0
 
 
 # ============================================================= Counterparty

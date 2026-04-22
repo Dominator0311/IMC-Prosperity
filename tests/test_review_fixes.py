@@ -180,15 +180,15 @@ def test_statarb_picks_one_direction_not_both():
     )
     portfolio = build_portfolio_snapshot(
         timestamp=0, snapshots={"PROD": snap}, position_limits={"PROD": 100},
+        remote_quotes={"PROD": RemoteQuote(bid=100, ask=100)},
     )
-    remote = RemoteQuote(bid=100, ask=100)
-    orders, _conv, _tags = engine.step(portfolio, remote=remote)
+    result = engine.step(portfolio)
 
     # Must NOT emit orders in both directions simultaneously.
-    has_buy = any(o.quantity > 0 for o in orders)
-    has_sell = any(o.quantity < 0 for o in orders)
+    has_buy = any(o.quantity > 0 for o in result.orders)
+    has_sell = any(o.quantity < 0 for o in result.orders)
     assert not (has_buy and has_sell), (
-        f"stat-arb must pick one direction per tick; got {orders}"
+        f"stat-arb must pick one direction per tick; got {result.orders}"
     )
 
 

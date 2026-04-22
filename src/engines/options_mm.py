@@ -28,6 +28,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from src.core.primitives.engine_orchestrator import EngineStepResult
 from src.core.primitives.portfolio_context import PortfolioSnapshot
 from src.core.primitives.portfolio_risk import (
     PortfolioRiskManager,
@@ -115,22 +116,81 @@ class OptionsEngine:
         )
         self._recent_abs_returns = deque(maxlen=self.config.jump_window)
 
+    # ====================================================== PersistableEngine
+
+    @property
+    def engine_id(self) -> str:
+        return f"options_mm.{self.spec.underlying}"
+
+    @property
+    def owned_products(self) -> frozenset[str]:
+        return frozenset(
+            {self.spec.underlying, *(v.product for v in self.spec.vouchers)}
+        )
+
+    def to_state(self) -> dict:
+        return {
+            "smile": self._smile.snapshot(),
+            "recent_abs_returns": list(self._recent_abs_returns),
+            "last_underlying_mid": self._last_underlying_mid,
+            "kill_cooldown": self._in_kill_cooldown,
+        }
+
+    def from_state(self, blob: dict) -> None:
+        try:
+            smile_blob = blob.get("smile", {})
+            if isinstance(smile_blob, dict):
+                self._smile = SmileFitter.restore(
+                    smile_blob,
+                    config=SmileConfig(
+                        warmup_threshold=self.config.smile_warmup_threshold,
+                        rolling_window=self.config.smile_rolling_window,
+                        ewma_halflife=self.config.smile_ewma_halflife,
+                    ),
+                )
+            returns = blob.get("recent_abs_returns", [])
+            if isinstance(returns, list):
+                self._recent_abs_returns = deque(
+                    [float(x) for x in returns if isinstance(x, (int, float))],
+                    maxlen=self.config.jump_window,
+                )
+            last_mid = blob.get("last_underlying_mid")
+            self._last_underlying_mid = (
+                float(last_mid) if isinstance(last_mid, (int, float)) else None
+            )
+            self._in_kill_cooldown = int(blob.get("kill_cooldown", 0))
+        except (TypeError, ValueError):
+            # Corrupted blob: cold-start.
+            self._smile = SmileFitter(
+                config=SmileConfig(
+                    warmup_threshold=self.config.smile_warmup_threshold,
+                    rolling_window=self.config.smile_rolling_window,
+                    ewma_halflife=self.config.smile_ewma_halflife,
+                )
+            )
+            self._recent_abs_returns = deque(maxlen=self.config.jump_window)
+            self._last_underlying_mid = None
+            self._in_kill_cooldown = 0
+
     # ====================================================== step
 
     def step(
         self,
         portfolio: PortfolioSnapshot,
-    ) -> tuple[list[Order], dict[str, ProductTag]]:
+        *,
+        current_tick: int | None = None,
+    ) -> EngineStepResult:
         """Emit orders for this tick across all strikes + hedge."""
+        _ = current_tick  # part of orchestrator contract
         underlying_snap = portfolio.for_product(self.spec.underlying)
         if underlying_snap is None or underlying_snap.mid is None:
-            return [], {}
+            return EngineStepResult()
 
         spot = float(underlying_snap.mid)
 
         # Jump detection.
         if self._detect_jump(spot):
-            return [], self._build_tags()
+            return EngineStepResult(tags=self._build_tags())
 
         # Observe IVs from live voucher prices to train the smile.
         self._train_smile(portfolio, spot)
@@ -158,7 +218,7 @@ class OptionsEngine:
             if hedge_order is not None:
                 orders.append(hedge_order)
 
-        return orders, self._build_tags()
+        return EngineStepResult(orders=orders, tags=self._build_tags())
 
     # ====================================================== sub-steps
 

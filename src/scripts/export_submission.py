@@ -65,6 +65,12 @@ LIVE_MODULE_ORDER: tuple[str, ...] = (
     "src/strategies/__init__.py",
     "src/trader.py",
 )
+# NOTE: ``src/core/primitives/*`` and ``src/conversions/*`` are deliberately
+# NOT in the bundle. R2 Prosperity submissions don't use the orchestrator
+# path (Trader is constructed with orchestrator=None), so bundling those
+# modules would waste the 120KB bundle budget. R3+ submissions that enable
+# an orchestrator must extend LIVE_MODULE_ORDER (or ship a separate
+# R3 bundle) to include the additional modules.
 
 DATAMODEL_PATH: str = "src/datamodel.py"
 
@@ -158,28 +164,79 @@ def strip_module(path: str, source: str) -> StrippedModule:
     hoisted_imports: list[str] = []
     datamodel_symbols: set[str] = set()
 
-    for node in tree.body:
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
-
+    def _process_import_node(node: ast.stmt, *, hoist: bool) -> None:
         line_range = _import_line_range(node)
-
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if module == "__future__":
                 removal.update(line_range)
-                continue
+                return
             if module == "src.datamodel":
                 removal.update(line_range)
                 datamodel_symbols.update(alias.name for alias in node.names)
-                continue
+                return
             if module == "src" or module.startswith("src."):
                 removal.update(line_range)
-                continue
-
-        # Non-src, non-future import: hoist the raw text.
+                return
+        if not hoist:
+            # Nested (non-top-level) non-src imports stay in the body so
+            # the local code path still works (e.g., a function-level
+            # stdlib import). We only hoist from module scope.
+            return
         hoisted_indices.update(line_range)
         hoisted_imports.append("\n".join(lines[line_range.start : line_range.stop]))
+
+    def _scan_typecheck_block(if_node: ast.If) -> None:
+        """Strip the entire ``if TYPE_CHECKING:`` block.
+
+        By convention these blocks contain only import statements for
+        type-only references that never run at runtime. Removing the
+        block outright avoids "expected an indented block" syntax
+        errors after the inner imports are stripped. The condition
+        must be a bare ``TYPE_CHECKING`` name or ``typing.TYPE_CHECKING``
+        attribute access; other ``if`` blocks at module scope are
+        ignored.
+        """
+        test = if_node.test
+        is_tc = False
+        if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+            is_tc = True
+        elif (
+            isinstance(test, ast.Attribute)
+            and test.attr == "TYPE_CHECKING"
+        ):
+            is_tc = True
+        if not is_tc:
+            return
+        # Remove the whole block — header plus body (including any
+        # ``else`` branch, which by convention is empty here).
+        start = if_node.lineno - 1
+        end = if_node.end_lineno or if_node.lineno
+        removal.update(range(start, end))
+
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            _process_import_node(node, hoist=True)
+            continue
+        if isinstance(node, ast.If):
+            _scan_typecheck_block(node)
+
+    # Strip nested ``from src.*`` imports at any depth (e.g. lazy imports
+    # inside function bodies used by R3+ code paths). In the submission
+    # bundle those modules aren't shipped; the lazy path is unreachable
+    # because the orchestrator is always disabled in R1/R2 bundles, so
+    # removing the import line just avoids validator false-positives.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = node.module or ""
+        if module != "src" and not module.startswith("src."):
+            continue
+        if module == "src.datamodel":
+            continue  # handled separately
+        start = node.lineno - 1
+        end = node.end_lineno or node.lineno
+        removal.update(range(start, end))
 
     body_lines = [
         line for idx, line in enumerate(lines) if idx not in removal and idx not in hoisted_indices
@@ -247,13 +304,49 @@ def _collect_src_imports(source: str, *, path: str) -> set[str]:
     except SyntaxError as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to parse {path}: {exc}") from exc
 
+    def _in_typecheck_block(path_stack: tuple[ast.AST, ...]) -> bool:
+        """True if this node is nested under ``if TYPE_CHECKING:``.
+
+        TYPE_CHECKING-guarded imports never run at runtime and are
+        stripped by ``strip_module``, so they must not trigger the
+        completeness check.
+        """
+        for anc in path_stack:
+            if not isinstance(anc, ast.If):
+                continue
+            test = anc.test
+            if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+                return True
+            if (
+                isinstance(test, ast.Attribute)
+                and test.attr == "TYPE_CHECKING"
+            ):
+                return True
+        return False
+
     deps: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        module = node.module or ""
-        if module == "src" or module.startswith("src."):
-            deps.add(module)
+
+    def _walk(node: ast.AST, stack: tuple[ast.AST, ...]) -> None:
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module == "src" or module.startswith("src."):
+                # Runtime src imports only: skip function/method-body
+                # imports (lazy), skip TYPE_CHECKING blocks.
+                if _in_typecheck_block(stack):
+                    return
+                # Function-scope imports are lazy by design (R3+
+                # orchestrator plumbing loaded only when enabled).
+                if any(
+                    isinstance(anc, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    for anc in stack
+                ):
+                    return
+                deps.add(module)
+            return
+        for child in ast.iter_child_nodes(node):
+            _walk(child, stack + (node,))
+
+    _walk(tree, ())
     return deps
 
 

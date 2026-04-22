@@ -24,6 +24,7 @@ surface errors.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from src.core.config import EngineConfig, ProductConfig, default_engine_config
 from src.core.execution import ExecutionEngine
@@ -41,6 +42,15 @@ from src.signals.flow_analyzer import FlowAnalyzer
 from src.strategies import STRATEGY_REGISTRY
 from src.strategies.base import BaseStrategy, StrategyContext
 
+# The orchestrator + portfolio_context + conversions adapter are R3+
+# cross-product plumbing. R1/R2 Prosperity submissions don't bundle those
+# modules, so we import them lazily (inside _run_body when the orchestrator
+# is enabled) to keep the submission bundle small and to avoid ImportError
+# if the R2 bundle is stripped. Type annotations use TYPE_CHECKING so the
+# exporter strips them correctly.
+if TYPE_CHECKING:
+    from src.core.primitives.engine_orchestrator import EngineOrchestrator
+
 _LOG = logging.getLogger(__name__)
 
 # Memory key used by the day-rollover detector to remember the last
@@ -57,6 +67,7 @@ class Trader:
         *,
         state_store: StateStore | None = None,
         reraise_exceptions: bool = False,
+        orchestrator: "EngineOrchestrator | None" = None,
     ) -> None:
         self.config = config or default_engine_config()
         self.state_store = state_store or StateStore(
@@ -72,6 +83,10 @@ class Trader:
         self.flow_analyzer = FlowAnalyzer(self.config.scanner_config)
         self.logger = DecisionLogger()
         self._reraise_exceptions = reraise_exceptions
+        # Cross-product engine orchestrator (R3+). Optional: legacy R1/R2
+        # runs pass None and behave exactly as before (no portfolio snapshot,
+        # no engine dispatch, conversions fixed at 0).
+        self.orchestrator = orchestrator
         self.strategies: dict[str, BaseStrategy] = self._build_strategies()
 
     # ---------------------------------------------------------- setup
@@ -122,7 +137,53 @@ class Trader:
         snapshots = self.market_data.normalize_state(state)
         results: dict[str, list[Order]] = {}
 
+        # Build cross-product portfolio snapshot (includes remote quotes
+        # extracted from ConversionObservations). Always constructed when
+        # an orchestrator is present OR any strategy may introspect it via
+        # StrategyContext.portfolio. Cheap — just shallow maps.
+        # Orchestrator modules are imported lazily so R1/R2 bundles (which
+        # don't ship primitives/conversions) never touch these symbols.
+        portfolio = None
+        orch_summary = None
+        if self.orchestrator is not None:
+            from src.conversions.adapter import extract_remote_quotes
+            from src.core.primitives.portfolio_context import (
+                build_portfolio_snapshot,
+            )
+
+            position_limits = {
+                p: cfg.position_limit for p, cfg in self.config.products.items()
+            }
+            remote_quotes = extract_remote_quotes(state)
+            portfolio = build_portfolio_snapshot(
+                timestamp=state.timestamp,
+                snapshots=snapshots,
+                position_limits=position_limits,
+                remote_quotes=remote_quotes,
+            )
+            # Restore engine state (idempotent across ticks — Prosperity
+            # re-enters run() freshly each tick), then step all engines.
+            self.orchestrator.restore(engine_state)
+            orch_summary = self.orchestrator.step(
+                portfolio, current_tick=state.timestamp,
+            )
+            # Orchestrator-owned products get their orders from engines,
+            # not from per-product dispatch. Pre-seed results so the
+            # returned dict shape still includes them.
+            for product, orders in orch_summary.orders_by_product.items():
+                results[product] = list(orders)
+
+        handled_products = (
+            orch_summary.handled_products if orch_summary else set()
+        )
+
         for product, snapshot in snapshots.items():
+            if product in handled_products:
+                # An engine owns this product; skip per-product dispatch
+                # to avoid conflicting orders. Engine orders are already
+                # in ``results`` from the block above.
+                continue
+
             product_config = self.config.product_config(product)
             if product_config is None:
                 results[product] = []
@@ -146,13 +207,24 @@ class Trader:
                 product_config=product_config,
                 strategy=strategy,
                 timestamp=state.timestamp,
+                portfolio=portfolio,
             )
             results[product] = legal_orders
             self._update_memory(memory, snapshot, product_config.history_length)
             memory.counters[_LAST_SEEN_TIMESTAMP_KEY] = int(snapshot.timestamp)
 
+        # Persist engine state BEFORE state_store.save() so its budget-aware
+        # truncation sees the full engine blobs.
+        if self.orchestrator is not None:
+            self.orchestrator.persist(engine_state)
+            if orch_summary and orch_summary.errored_engines:
+                _LOG.warning(
+                    "Engines raised this tick: %s",
+                    orch_summary.errored_engines,
+                )
+
         trader_data = self.state_store.save(engine_state)
-        conversions = 0
+        conversions = orch_summary.total_conversions if orch_summary else 0
         return results, conversions, trader_data
 
     # ---------------------------------------------------------- per-product
@@ -166,15 +238,25 @@ class Trader:
         product_config: ProductConfig,
         strategy: BaseStrategy,
         timestamp: int,
+        portfolio=None,
     ) -> list[Order]:
         # Observational flow scan — never alters strategy behaviour.
         flow_report = self.flow_analyzer.scan(snapshot, memory)
 
+        # Strategies that opt into cross-product state receive the
+        # PortfolioSnapshot and the orchestrator's SignalBus via
+        # StrategyContext. Legacy single-product strategies ignore these
+        # optional fields.
+        signal_bus = (
+            self.orchestrator.signal_bus if self.orchestrator is not None else None
+        )
         context = StrategyContext(
             product=product,
             snapshot=snapshot,
             memory=memory,
             config=product_config,
+            portfolio=portfolio,
+            signal_bus=signal_bus,
         )
         intent = strategy.generate_intent(context)
         raw_orders = self.execution_engine.generate_orders(snapshot, intent, product_config)
