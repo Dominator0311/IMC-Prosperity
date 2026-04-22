@@ -256,7 +256,66 @@ class Trader:
 
         trader_data = self.state_store.save(engine_state)
         conversions = orch_summary.total_conversions if orch_summary else 0
+
+        # Per-tick summary: one structured event per run() that carries
+        # the cross-cutting counters (orders per product, conversions,
+        # errored engine count, handled-product set). Lets post-mortem
+        # tooling reconstruct a round's engine behaviour from the log
+        # without re-running the replay. Cheap — a single dict append.
+        self._record_tick_summary(
+            timestamp=state.timestamp,
+            results=results,
+            conversions=conversions,
+            orch_summary=orch_summary,
+        )
+
         return results, conversions, trader_data
+
+    def _record_tick_summary(
+        self,
+        *,
+        timestamp: int,
+        results: dict[str, list[Order]],
+        conversions: int,
+        orch_summary,
+    ) -> None:
+        """Emit a compact per-tick summary into the DecisionLogger.
+
+        Fields:
+          - ``timestamp``: tick timestamp as received from Prosperity
+          - ``order_counts``: ``{product: len(orders)}`` for products
+            that emitted at least one order (empty products omitted to
+            keep the event small)
+          - ``conversions``: total conversions for this tick
+          - ``engines``: number of engines run this tick (orchestrator
+            mode only; 0 otherwise)
+          - ``engine_errors``: names of engines whose step() raised
+            this tick
+          - ``handled_products``: products owned by engines this tick
+        """
+        order_counts = {
+            product: len(orders)
+            for product, orders in results.items()
+            if orders
+        }
+        summary: dict[str, object] = {
+            "event": "tick_summary",
+            "timestamp": int(timestamp),
+            "order_counts": order_counts,
+            "conversions": int(conversions),
+        }
+        if orch_summary is not None:
+            summary["engines"] = (
+                self.orchestrator.engine_count
+                if self.orchestrator is not None else 0
+            )
+            if orch_summary.errored_engines:
+                summary["engine_errors"] = list(orch_summary.errored_engines)
+            if orch_summary.handled_products:
+                summary["handled_products"] = sorted(
+                    orch_summary.handled_products
+                )
+        self.logger.record(summary)
 
     # ---------------------------------------------------------- per-product
 
