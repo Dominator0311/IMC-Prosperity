@@ -25,6 +25,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from src.core.primitives.engine_orchestrator import EngineStepResult
 from src.core.primitives.hysteresis_sizer import (
     HysteresisConfig,
     target_position,
@@ -130,32 +131,64 @@ class BasketArbEngine:
     _stats: _WelfordStats = field(default_factory=_WelfordStats)
     _current_target_basket: int = 0
 
+    # ====================================================== PersistableEngine
+
+    @property
+    def engine_id(self) -> str:
+        return f"basket_arb.{self.spec.basket}"
+
+    @property
+    def owned_products(self) -> frozenset[str]:
+        return frozenset({self.spec.basket, *self.spec.weights.keys()})
+
+    def to_state(self) -> dict:
+        return {
+            "stats_n": self._stats.n,
+            "stats_mean": self._stats.mean,
+            "stats_m2": self._stats.m2,
+            "target_basket": self._current_target_basket,
+        }
+
+    def from_state(self, blob: dict) -> None:
+        try:
+            self._stats.n = int(blob.get("stats_n", 0))
+            self._stats.mean = float(blob.get("stats_mean", 0.0))
+            self._stats.m2 = float(blob.get("stats_m2", 0.0))
+            self._current_target_basket = int(blob.get("target_basket", 0))
+        except (TypeError, ValueError):
+            # Corrupted blob: fall back to cold-start defaults.
+            self._stats = _WelfordStats()
+            self._current_target_basket = 0
+
     # ====================================================== step
 
     def step(
         self,
         portfolio: PortfolioSnapshot,
-    ) -> tuple[list[Order], dict[str, ProductTag]]:
-        """Emit orders for this tick. Returns (orders, tags-by-product)."""
+        *,
+        current_tick: int | None = None,
+    ) -> EngineStepResult:
+        """Emit orders for this tick. Returns EngineStepResult."""
+        _ = current_tick  # not yet used; part of orchestrator contract
         # 1. Compute spread = basket_mid - Σ w_i * constituent_mid.
         basket_snap = portfolio.for_product(self.spec.basket)
         if basket_snap is None:
-            return [], {}
+            return EngineStepResult()
 
         wm_cfg = WallMidConfig(min_volume=self.config.wall_mid_min_volume)
         basket_mid = max_amount_mid(basket_snap, wm_cfg)
         if basket_mid is None:
-            return [], {}
+            return EngineStepResult()
 
         theoretical = 0.0
         constituent_mids: dict[str, float] = {}
         for product, weight in self.spec.weights.items():
             snap = portfolio.for_product(product)
             if snap is None:
-                return [], {}
+                return EngineStepResult()
             mid = max_amount_mid(snap, wm_cfg)
             if mid is None:
-                return [], {}
+                return EngineStepResult()
             constituent_mids[product] = mid
             theoretical += weight * mid
 
@@ -166,7 +199,7 @@ class BasketArbEngine:
 
         # 3. Compute z-score + emit signal.
         if self._stats.n < self.config.welford_warmup:
-            return [], self._build_tags()
+            return EngineStepResult(tags=self._build_tags())
 
         sigma = self._stats.stdev()
         z = 0.0 if sigma == 0 else (spread - self._stats.mean) / sigma
@@ -228,7 +261,7 @@ class BasketArbEngine:
             portfolio=portfolio,
         )
 
-        return orders, self._build_tags()
+        return EngineStepResult(orders=orders, tags=self._build_tags())
 
     # ====================================================== helpers
 

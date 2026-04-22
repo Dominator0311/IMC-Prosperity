@@ -36,8 +36,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from src.core.types import NormalizedSnapshot, Product, ProductMemory, Timestamp
+
+if TYPE_CHECKING:
+    from src.conversions.layer import RemoteQuote
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,14 @@ class PortfolioSnapshot:
         default_factory=lambda: MappingProxyType({})
     )
 
+    # Cross-exchange conversion data — best-bid / best-ask on the remote
+    # exchange per product, extracted from TradingState.observations by
+    # the Trader. Populated only for products that have a
+    # ConversionObservation this tick; absent otherwise.
+    remote_quotes: Mapping[Product, "RemoteQuote"] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
     def for_product(self, product: Product) -> NormalizedSnapshot | None:
         """Return the snapshot for a product, or None if absent this tick."""
         return self.snapshots.get(product)
@@ -79,6 +91,9 @@ class PortfolioSnapshot:
     def limit_of(self, product: Product) -> int:
         return int(self.position_limits.get(product, 0))
 
+    def remote_for(self, product: Product) -> "RemoteQuote | None":
+        return self.remote_quotes.get(product)
+
     def products(self) -> tuple[Product, ...]:
         return tuple(self.snapshots.keys())
 
@@ -87,6 +102,7 @@ def build_portfolio_snapshot(
     timestamp: Timestamp,
     snapshots: Mapping[Product, NormalizedSnapshot],
     position_limits: Mapping[Product, int],
+    remote_quotes: "Mapping[Product, RemoteQuote] | None" = None,
 ) -> PortfolioSnapshot:
     """Factory used by the trader dispatch layer.
 
@@ -99,4 +115,5 @@ def build_portfolio_snapshot(
         snapshots=MappingProxyType(dict(snapshots)),
         positions=MappingProxyType(positions),
         position_limits=MappingProxyType(dict(position_limits)),
+        remote_quotes=MappingProxyType(dict(remote_quotes or {})),
     )

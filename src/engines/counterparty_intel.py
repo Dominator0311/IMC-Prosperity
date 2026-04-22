@@ -37,6 +37,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Literal
 
+from src.core.primitives.engine_orchestrator import EngineStepResult
 from src.core.primitives.portfolio_context import PortfolioSnapshot
 from src.core.primitives.signal_bus import SignalBus, SignalValue
 
@@ -106,8 +107,102 @@ class CounterpartyIntelEngine:
             deque(maxlen=self.config.max_pending_fills),
         )
 
-    def step(self, portfolio: PortfolioSnapshot, current_tick: int) -> None:
-        """Process one tick. Emits signals to the bus as side effect."""
+    # ====================================================== PersistableEngine
+
+    @property
+    def engine_id(self) -> str:
+        return "counterparty_intel"
+
+    @property
+    def owned_products(self) -> frozenset[str]:
+        # Observation-only: does not emit orders on any product. The
+        # per-product strategy dispatch continues normally for all products.
+        return frozenset()
+
+    def to_state(self) -> dict:
+        """Serialize counterparty states + pending fills.
+
+        Budget-aware: only persist counterparties with >= min_trades trades
+        to avoid bloating traderData with ephemeral noise fingerprints.
+        """
+        min_persist = max(5, self.config.min_trades_for_classification // 2)
+        states_blob: dict[str, dict] = {}
+        for cp_id, state in self._states.items():
+            if state.trade_count < min_persist:
+                continue
+            states_blob[cp_id] = {
+                "cum_pnl": round(state.cum_pnl, 4),
+                "trade_count": state.trade_count,
+                "wins": state.wins,
+                "resolved_trades": state.resolved_trades,
+                "implied_position": dict(state.implied_position),
+                "max_position_abs": state.max_position_abs,
+                "regime": state.regime,
+            }
+        # Pending fills: already bounded by deque maxlen; persist as list.
+        pending_blob = [
+            list(p) for p in self._pending_fills
+        ]
+        return {
+            "states": states_blob,
+            "pending_fills": pending_blob,
+        }
+
+    def from_state(self, blob: dict) -> None:
+        try:
+            states_in = blob.get("states", {})
+            if isinstance(states_in, dict):
+                restored: dict[str, CounterpartyState] = {}
+                for cp_id, s in states_in.items():
+                    if not isinstance(s, dict):
+                        continue
+                    restored[cp_id] = CounterpartyState(
+                        cum_pnl=float(s.get("cum_pnl", 0.0)),
+                        trade_count=int(s.get("trade_count", 0)),
+                        wins=int(s.get("wins", 0)),
+                        resolved_trades=int(s.get("resolved_trades", 0)),
+                        implied_position={
+                            str(k): int(v)
+                            for k, v in s.get("implied_position", {}).items()
+                        },
+                        max_position_abs=int(s.get("max_position_abs", 0)),
+                        regime=s.get("regime", "unknown"),
+                    )
+                self._states = restored
+            pending_in = blob.get("pending_fills", [])
+            if isinstance(pending_in, list):
+                new_pending: deque = deque(maxlen=self.config.max_pending_fills)
+                for p in pending_in:
+                    if isinstance(p, list) and len(p) == 6:
+                        try:
+                            new_pending.append((
+                                str(p[0]),
+                                int(p[1]),
+                                str(p[2]),
+                                int(p[3]),
+                                int(p[4]),
+                                float(p[5]),
+                            ))
+                        except (TypeError, ValueError):
+                            continue
+                self._pending_fills = new_pending
+        except (TypeError, ValueError, AttributeError):
+            # Corrupted blob: reset to fresh state.
+            self._states = {}
+            self._pending_fills = deque(maxlen=self.config.max_pending_fills)
+
+    # ====================================================== step
+
+    def step(
+        self,
+        portfolio: PortfolioSnapshot,
+        *,
+        current_tick: int,
+    ) -> EngineStepResult:
+        """Process one tick. Emits signals to the bus as side effect.
+
+        Returns an empty EngineStepResult — this engine is observation-only.
+        """
         # Update rolling mids and look for pending-fill resolutions.
         for product, snap in portfolio.snapshots.items():
             if product not in self._recent_mids:
@@ -165,6 +260,8 @@ class CounterpartyIntelEngine:
                             },
                         )
                     )
+
+        return EngineStepResult()
 
     # ============================================== ingest
 
