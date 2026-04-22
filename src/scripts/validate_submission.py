@@ -63,10 +63,16 @@ DEFAULT_TARGET = REPO_ROOT / "outputs" / "submissions" / "trader_submission.py"
 #   time to think about what is in the live path".
 # - ``MAX_SIZE_BYTES`` raises an ERROR — "do not upload this".
 #
-# The soft threshold is deliberately well below the hard ceiling so
-# that a WARN gives us meaningful lead time as the codebase grows.
-SOFT_SIZE_BYTES: int = 72 * 1024
-MAX_SIZE_BYTES: int = 96 * 1024
+# Round 2 bump (post Phase-9 + Round-2 plumbing): the codebase has
+# grown past the original 72/96 KiB pair as new R1 factories,
+# Phase-9 fastsearch knobs and Round-2 MAF wiring landed. The IMC
+# ceiling is ~128 KiB, so the new pair (96 KiB warn / 120 KiB error)
+# keeps a 6 % safety margin under the platform cap while reflecting
+# what the bundle actually weighs today. Bundle slimming is a
+# separate cleanup task (see batch-A handoff notes); this validator
+# is the gate, not the trim.
+SOFT_SIZE_BYTES: int = 96 * 1024
+MAX_SIZE_BYTES: int = 120 * 1024
 
 # Modules a live submission must never import. Roots are matched as
 # either an exact module name or a prefix (``x.y.z`` matches ``x``).

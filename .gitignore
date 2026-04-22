@@ -12,6 +12,4 @@ __pycache__/
 .venv/
 venv/
 
-outputs/
 notebooks/.ipynb_checkpoints/
-

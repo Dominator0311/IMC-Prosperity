@@ -129,8 +129,18 @@ class ProductMemory:
 
 @dataclass
 class EngineState:
+    """Persistent state carried across ticks via ``traderData``.
+
+    - ``products``: legacy per-product rolling memory (unchanged).
+    - ``engines``: R3+ cross-product engine state keyed by engine_id.
+      Each engine owns its own JSON-serializable sub-dict. StateStore
+      round-trips the dict; engines are responsible for their own
+      serialization shape via ``to_state()`` / ``from_state()``.
+    """
+
     version: int = 1
     products: dict[Product, ProductMemory] = field(default_factory=dict)
+    engines: dict[str, dict] = field(default_factory=dict)
 
     def for_product(self, product: Product) -> ProductMemory:
         memory = self.products.get(product)
@@ -138,6 +148,18 @@ class EngineState:
             memory = ProductMemory()
             self.products[product] = memory
         return memory
+
+    def for_engine(self, engine_id: str) -> dict:
+        """Return the persisted state blob for an engine, or an empty dict."""
+        blob = self.engines.get(engine_id)
+        if blob is None:
+            blob = {}
+            self.engines[engine_id] = blob
+        return blob
+
+    def set_engine_state(self, engine_id: str, blob: dict) -> None:
+        """Overwrite the persisted state for an engine."""
+        self.engines[engine_id] = blob
 
 
 @dataclass(frozen=True)
@@ -165,4 +187,66 @@ class SignalIntent:
     sell_above: float | None = None
     quote: QuoteIntent | None = None
     rationale: str = ""
+    metadata: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)
+
+
+# ---------------------------------------------------------------- scanner
+
+
+@dataclass(frozen=True)
+class ScannerConfig:
+    """Controls whether and how verbosely the flow scanner runs.
+
+    Verbosity levels:
+    - 0 (default): silent — scanner runs and persists state but adds
+      nothing to the decision logger. Suitable for live submission.
+    - 1: flags-only — appends ``scan_flags`` to the logger event.
+    - 2: full report — appends the complete ``FlowReport`` dict to the
+      logger event. Intended for offline review scripts only.
+    """
+
+    enabled: bool = True
+    extrema_window: int = 20
+    extrema_tolerance: float = 1.0
+    flow_decay: float = 0.8
+    repeated_size_threshold: int = 3
+    verbosity: int = 0
+
+
+@dataclass(frozen=True)
+class ResidualConfig:
+    """Controls the optional residual capacity utilizer.
+
+    Ships disabled (framework-only). Enable only after the enablement
+    gate is passed: compare baseline vs baseline+residual on PnL, trade
+    count, maker/taker mix, markouts, and time-near-limits. Record
+    results in a review note before flipping the flag.
+    """
+
+    enabled: bool = False
+    residual_edge: float = 2.0
+    residual_size: int = 2
+
+
+@dataclass(frozen=True)
+class FlowReport:
+    """Observational summary of trade-flow patterns for a single step.
+
+    All fields are ephemeral — only ``flow_score`` (via
+    ``ProductMemory.values``) and ``step_count`` (via
+    ``ProductMemory.counters``) are persisted across calls.
+
+    ``net_flow`` is a heuristic proxy for directional pressure, not
+    true aggressor-side inference. The sign convention is: buyer-only
+    trade -> +qty, seller-only -> -qty, both or neither -> 0.
+    """
+
+    product: Product
+    timestamp: Timestamp
+    repeated_sizes: Mapping[int, int]
+    net_flow: int
+    flow_score: float
+    near_high: bool
+    near_low: bool
+    flags: tuple[str, ...]
     metadata: Mapping[str, Scalar] = field(default_factory=_empty_scalar_map)

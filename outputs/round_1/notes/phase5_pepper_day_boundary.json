@@ -1,0 +1,142 @@
+[
+  {
+    "flatten_overlay_pnl_delta_by_day": {
+      "-2": -344.0,
+      "-1": -166.5,
+      "0": -703.0
+    },
+    "flatten_overlay_total_delta": -1213.5,
+    "label": "pepper_c1_linear_drift_h32_t20_f08",
+    "overall_pnl": 56300.0,
+    "pack": "outputs/round_1/review_packs/20260414T140404Z_round1_pepper_c1_linear_drift_h32_t20_f08",
+    "per_day": {
+      "-2": {
+        "pnl_at_end_of_day": 20939.5,
+        "position_at_end_of_day": 13,
+        "tail_pnl": 294.5,
+        "trade_count": 244,
+        "trades_in_tail": 1
+      },
+      "-1": {
+        "pnl_at_end_of_day": 37581.0,
+        "position_at_end_of_day": 7,
+        "tail_pnl": 301.5,
+        "trade_count": 278,
+        "trades_in_tail": 6
+      },
+      "0": {
+        "pnl_at_end_of_day": 56300.0,
+        "position_at_end_of_day": 34,
+        "tail_pnl": 872.0,
+        "trade_count": 278,
+        "trades_in_tail": 4
+      }
+    },
+    "pnl_lag1_autocorr": -0.4433101258546098
+  },
+  {
+    "flatten_overlay_pnl_delta_by_day": {
+      "-2": -344.0,
+      "-1": -166.5,
+      "0": -610.5
+    },
+    "flatten_overlay_total_delta": -1121.0,
+    "label": "pepper_c1b_linear_drift_h32_t20_f07",
+    "overall_pnl": 54015.0,
+    "pack": "outputs/round_1/review_packs/20260414T140923Z_round1_pepper_c1b_linear_drift_h32_t20_f07",
+    "per_day": {
+      "-2": {
+        "pnl_at_end_of_day": 20574.5,
+        "position_at_end_of_day": 13,
+        "tail_pnl": 294.5,
+        "trade_count": 241,
+        "trades_in_tail": 1
+      },
+      "-1": {
+        "pnl_at_end_of_day": 36631.0,
+        "position_at_end_of_day": 7,
+        "tail_pnl": 301.5,
+        "trade_count": 276,
+        "trades_in_tail": 6
+      },
+      "0": {
+        "pnl_at_end_of_day": 54015.0,
+        "position_at_end_of_day": 29,
+        "tail_pnl": 772.0,
+        "trade_count": 275,
+        "trades_in_tail": 4
+      }
+    },
+    "pnl_lag1_autocorr": -0.4427792396763597
+  },
+  {
+    "flatten_overlay_pnl_delta_by_day": {
+      "-2": -258.0,
+      "-1": -259.0,
+      "0": -758.5
+    },
+    "flatten_overlay_total_delta": -1275.5,
+    "label": "pepper_c2_linear_drift_h32_skew1_f09",
+    "overall_pnl": 78844.0,
+    "pack": "outputs/round_1/review_packs/20260414T140931Z_round1_pepper_c2_linear_drift_h32_skew1_f09",
+    "per_day": {
+      "-2": {
+        "pnl_at_end_of_day": 32422.5,
+        "position_at_end_of_day": 9,
+        "tail_pnl": 208.5,
+        "trade_count": 243,
+        "trades_in_tail": 1
+      },
+      "-1": {
+        "pnl_at_end_of_day": 55407.0,
+        "position_at_end_of_day": 12,
+        "tail_pnl": 394.0,
+        "trade_count": 283,
+        "trades_in_tail": 6
+      },
+      "0": {
+        "pnl_at_end_of_day": 78844.0,
+        "position_at_end_of_day": 37,
+        "tail_pnl": 932.0,
+        "trade_count": 277,
+        "trades_in_tail": 4
+      }
+    },
+    "pnl_lag1_autocorr": -0.44636331152692066
+  },
+  {
+    "flatten_overlay_pnl_delta_by_day": {
+      "-2": -473.0,
+      "-1": -74.0,
+      "0": -555.0
+    },
+    "flatten_overlay_total_delta": -1102.0,
+    "label": "pepper_c3_linear_drift_h32_skew4_f08",
+    "overall_pnl": 35201.0,
+    "pack": "outputs/round_1/review_packs/20260414T140421Z_round1_pepper_c3_linear_drift_h32_skew4_f08",
+    "per_day": {
+      "-2": {
+        "pnl_at_end_of_day": 12965.5,
+        "position_at_end_of_day": 19,
+        "tail_pnl": 423.5,
+        "trade_count": 240,
+        "trades_in_tail": 1
+      },
+      "-1": {
+        "pnl_at_end_of_day": 23870.0,
+        "position_at_end_of_day": 2,
+        "tail_pnl": 209.0,
+        "trade_count": 262,
+        "trades_in_tail": 6
+      },
+      "0": {
+        "pnl_at_end_of_day": 35201.0,
+        "position_at_end_of_day": 18,
+        "tail_pnl": 520.0,
+        "trade_count": 261,
+        "trades_in_tail": 3
+      }
+    },
+    "pnl_lag1_autocorr": -0.4373218937675112
+  }
+]

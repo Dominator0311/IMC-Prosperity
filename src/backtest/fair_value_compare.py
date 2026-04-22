@@ -57,6 +57,9 @@ class EstimatorComparison:
     maker_share: float | None
     final_position: int
     steps_near_limit: int
+    mean_diff_vs_primary: float | None = None
+    mean_diff_vs_mid: float | None = None
+    value_change_frequency: float | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,21 @@ class ProductFairValueComparison:
             "delta_n1 compares estimator next-step MAE against the current-mid baseline "
             f"({ _fmt(self.baseline_next_mid_mae) })"
         )
+        # Distinctness diagnostics
+        lines.append("")
+        lines.append("Distinctness diagnostics")
+        d_header = f"{'estimator':<18} {'d_primary':>10} {'d_mid':>10} {'chg%':>7}"
+        lines.append(d_header)
+        lines.append("-" * len(d_header))
+        for row in self.comparisons:
+            d_pri = _fmt(row.mean_diff_vs_primary)
+            d_mid = _fmt(row.mean_diff_vs_mid)
+            chg = (
+                f"{row.value_change_frequency * 100:.1f}"
+                if row.value_change_frequency is not None
+                else "n/a"
+            )
+            lines.append(f"{row.estimator:<18} {d_pri:>10} {d_mid:>10} {chg:>7}")
         return "\n".join(lines)
 
 
@@ -156,34 +174,31 @@ def build_fair_value_report(
         product_replay = filter_replay_to_product(replay, product)
         if not product_replay.steps:
             continue
-        analysis_product_config = _analysis_product_config(
-            product_replay=product_replay,
-            product=product,
+        supported_estimators = _supported_estimator_names(
             product_config=product_config,
+            estimator_names=estimator_names,
         )
 
         records = _build_snapshot_records(
             product_replay,
             product=product,
-            product_config=analysis_product_config,
-            estimator_names=estimator_names,
+            product_config=product_config,
+            estimator_names=supported_estimators,
         )
         baseline_next_mid_mae = _baseline_next_mid_mae(records)
 
         comparisons: list[EstimatorComparison] = []
-        for estimator_name in estimator_names:
-            if estimator_name not in ESTIMATORS:
-                continue
+        for estimator_name in supported_estimators:
             comparisons.append(
                 _compare_estimator(
                     product_replay=product_replay,
                     product=product,
                     estimator_name=estimator_name,
-                    product_config=analysis_product_config,
+                    product_config=product_config,
                     engine_config=engine_config,
                     records=records,
                     baseline_next_mid_mae=baseline_next_mid_mae,
-                    estimator_names=estimator_names,
+                    estimator_names=supported_estimators,
                 )
             )
 
@@ -257,32 +272,20 @@ def _build_snapshot_records(
     return records
 
 
-def _analysis_product_config(
+def _supported_estimator_names(
     *,
-    product_replay: ReplayEngine,
-    product: str,
     product_config: ProductConfig,
-) -> ProductConfig:
-    if product_config.anchor_price is not None:
-        return product_config
+    estimator_names: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in estimator_names
+        if name in ESTIMATORS and _estimator_supported(product_config, name)
+    )
 
-    adapter = MarketDataAdapter()
-    mids: list[float] = []
-    for step in product_replay.steps:
-        state = ReplayEngine.build_trading_state(
-            step,
-            trader_data="",
-            position={product: 0},
-            own_trades={},
-        )
-        snapshot = adapter.normalize_state(state)[product]
-        if snapshot.mid is not None:
-            mids.append(snapshot.mid)
 
-    if not mids:
-        return product_config
-
-    return replace(product_config, anchor_price=sum(mids) / len(mids))
+def _estimator_supported(product_config: ProductConfig, estimator_name: str) -> bool:
+    return not (estimator_name == "anchor" and product_config.anchor_price is None)
 
 
 def _compare_estimator(
@@ -327,14 +330,38 @@ def _compare_estimator(
         estimator_names=estimator_names,
     )
 
-    total_trade_qty = (
-        replay_result.taker_trade_quantity + replay_result.maker_trade_quantity
-    )
+    total_trade_qty = replay_result.taker_trade_quantity + replay_result.maker_trade_quantity
     maker_share = (
         replay_result.maker_trade_quantity / total_trade_qty if total_trade_qty > 0 else None
     )
 
     next_mid_mae = _mean(next_mid_errors)
+
+    # Distinctness diagnostics
+    primary_name = product_config.fair_value_method
+    diff_vs_primary_vals: list[float] = []
+    diff_vs_mid_vals: list[float] = []
+    prev_est: float | None = None
+    change_count = 0
+    pair_count = 0
+
+    for record in records:
+        est = record.estimates.get(estimator_name)
+        if est is not None:
+            primary_est = record.estimates.get(primary_name)
+            if primary_est is not None:
+                diff_vs_primary_vals.append(abs(est - primary_est))
+            mid_est = record.estimates.get("mid")
+            if mid_est is not None:
+                diff_vs_mid_vals.append(abs(est - mid_est))
+            if prev_est is not None:
+                pair_count += 1
+                if abs(est - prev_est) > 0:
+                    change_count += 1
+            prev_est = est
+        else:
+            prev_est = None
+
     return EstimatorComparison(
         estimator=estimator_name,
         samples=samples,
@@ -352,6 +379,9 @@ def _compare_estimator(
         maker_share=maker_share,
         final_position=replay_result.final_position,
         steps_near_limit=replay_result.steps_near_limit,
+        mean_diff_vs_primary=_mean(diff_vs_primary_vals),
+        mean_diff_vs_mid=_mean(diff_vs_mid_vals),
+        value_change_frequency=change_count / pair_count if pair_count > 0 else None,
     )
 
 
@@ -387,7 +417,9 @@ def _comparison_engine_config(
     safe_fallbacks = tuple(
         name
         for name in estimator_names
-        if name != estimator_name and name in ESTIMATORS and (name != "anchor" or product_config.anchor_price is not None)
+        if name != estimator_name
+        and name in ESTIMATORS
+        and (name != "anchor" or product_config.anchor_price is not None)
     )
     comparison_product_config = replace(
         product_config,
@@ -421,7 +453,9 @@ def _baseline_next_mid_mae(records: list[_SnapshotRecord]) -> float | None:
     return _mean(errors)
 
 
-def _update_memory(memory: ProductMemory, snapshot: NormalizedSnapshot, history_length: int) -> None:
+def _update_memory(
+    memory: ProductMemory, snapshot: NormalizedSnapshot, history_length: int
+) -> None:
     if history_length <= 0:
         return
     if snapshot.mid is not None:

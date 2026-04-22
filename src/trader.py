@@ -24,22 +24,38 @@ surface errors.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from src.core.config import EngineConfig, ProductConfig, default_engine_config
+from src.core.config_core import EngineConfig, ProductConfig
 from src.core.execution import ExecutionEngine
-from src.core.fair_value import FairValueEngine
 from src.core.logger import DecisionLogger
 from src.core.market_data import MarketDataAdapter
+from src.core.residual import ResidualAllocator
 from src.core.risk import RiskManager
 from src.core.signals import SignalEngine
 from src.core.state_store import StateStore
 from src.core.types import EngineState, NormalizedSnapshot, ProductMemory
 from src.core.utils import bounded_append
 from src.datamodel import Order, TradingState
-from src.strategies import STRATEGY_REGISTRY
-from src.strategies.base import BaseStrategy, StrategyContext
+from src.signals.flow_analyzer import FlowAnalyzer
+
+# Lazy-import gate. The following modules are heavy and only needed for
+# per-product strategy dispatch. An R3 submission whose every product is
+# owned by an orchestrator engine never touches them, and the R3
+# submission bundle drops them entirely. TYPE_CHECKING keeps the type
+# annotations below honest without pulling runtime imports.
+if TYPE_CHECKING:
+    from src.core.fair_value import FairValueEngine
+    from src.core.primitives.engine_orchestrator import EngineOrchestrator
+    from src.strategies.base import BaseStrategy
 
 _LOG = logging.getLogger(__name__)
+
+# Memory key used by the day-rollover detector to remember the last
+# snapshot.timestamp we saw for a product. A new snapshot whose
+# timestamp is *less than* this value indicates the simulator has
+# rolled over to a new day (timestamps reset to 0 on each new day).
+_LAST_SEEN_TIMESTAMP_KEY = "last_seen_timestamp"
 
 
 class Trader:
@@ -47,26 +63,67 @@ class Trader:
         self,
         config: EngineConfig | None = None,
         *,
+        state_store: StateStore | None = None,
         reraise_exceptions: bool = False,
+        orchestrator: "EngineOrchestrator | None" = None,
     ) -> None:
-        self.config = config or default_engine_config()
-        self.state_store = StateStore(
+        # Function-scope import: the bundler strips all src-package
+        # import lines from both module scope and function bodies, and
+        # the completeness check ignores function-scope src imports
+        # (see ``strip_module`` + ``_collect_src_imports`` in
+        # export_submission.py). At runtime the bundled flat namespace
+        # resolves ``default_engine_config`` to:
+        #   - R2 bundles: the multi-product factory in config.py.
+        #   - R3 bundles: the stub in config_core.py (config.py is
+        #     dropped from the bundle; the stub raises with a clear
+        #     message directing callers to supply their own EngineConfig).
+        if config is None:
+            from src.core.config import default_engine_config
+            config = default_engine_config()
+        self.config = config
+        self.state_store = state_store or StateStore(
             version=self.config.state_version,
             max_chars=self.config.max_trader_data_chars,
         )
         self.market_data = MarketDataAdapter()
-        self.fair_value_engine = FairValueEngine()
         self.signal_engine = SignalEngine()
         self.execution_engine = ExecutionEngine()
         self.risk_manager = RiskManager()
+        self.residual_allocator = ResidualAllocator(self.config.residual_config)
+        self.flow_analyzer = FlowAnalyzer(self.config.scanner_config)
         self.logger = DecisionLogger()
         self._reraise_exceptions = reraise_exceptions
-        self.strategies: dict[str, BaseStrategy] = self._build_strategies()
+        # Cross-product engine orchestrator (R3+). Optional: legacy R1/R2
+        # runs pass None and behave exactly as before (no portfolio snapshot,
+        # no engine dispatch, conversions fixed at 0).
+        self.orchestrator = orchestrator
+        # FairValueEngine + strategies are only instantiated when there
+        # is at least one product configured with a strategy_name. R3
+        # submissions that rely entirely on orchestrator-owned products
+        # leave ``products={}`` and skip the (heavy) fair_value + strategy
+        # machinery entirely — keeps the R3 bundle slim.
+        self.fair_value_engine: "FairValueEngine | None" = None
+        self.strategies: dict[str, "BaseStrategy"] = self._build_strategies()
 
     # ---------------------------------------------------------- setup
 
-    def _build_strategies(self) -> dict[str, BaseStrategy]:
+    def _build_strategies(self) -> dict[str, "BaseStrategy"]:
         strategies: dict[str, BaseStrategy] = {}
+        if not self.config.products:
+            # Pure-orchestrator submission: no per-product strategies,
+            # so skip the FairValueEngine / strategy-registry imports
+            # entirely. This is the hot path for R3 bundles that drop
+            # fair_value.py and strategies/* from the submission.
+            return strategies
+
+        # Lazy import: the fair_value + strategy subsystem is only
+        # needed when at least one product has a strategy_name. Moving
+        # these imports inside the function lets R3 bundles strip the
+        # ~24 KB of fair_value + strategy modules when they are unused.
+        from src.core.fair_value import FairValueEngine
+        from src.strategies import STRATEGY_REGISTRY
+
+        self.fair_value_engine = FairValueEngine()
         for product_config in self.config.products.values():
             name = product_config.strategy_name
             if name in strategies:
@@ -80,10 +137,12 @@ class Trader:
 
     # ---------------------------------------------------------- contract
 
-    # Some Prosperity rounds require a ``bid()`` method on Trader.
-    # Keep this stub so contract changes do not break submissions.
+    # Round-2 Market Access Fee. The Prosperity container reads this
+    # once at the start of the round; ignored in earlier rounds and in
+    # local test runs. Value is sourced from EngineConfig.bid_value so
+    # each export bundle ships with its own auction bid.
     def bid(self) -> int:
-        return 15
+        return self.config.bid_value
 
     def run(self, state: TradingState) -> tuple[dict[str, list[Order]], int, str]:
         """Entry point called by the Prosperity container.
@@ -109,7 +168,53 @@ class Trader:
         snapshots = self.market_data.normalize_state(state)
         results: dict[str, list[Order]] = {}
 
+        # Build cross-product portfolio snapshot (includes remote quotes
+        # extracted from ConversionObservations). Always constructed when
+        # an orchestrator is present OR any strategy may introspect it via
+        # StrategyContext.portfolio. Cheap — just shallow maps.
+        # Orchestrator modules are imported lazily so R1/R2 bundles (which
+        # don't ship primitives/conversions) never touch these symbols.
+        portfolio = None
+        orch_summary = None
+        if self.orchestrator is not None:
+            from src.conversions.adapter import extract_remote_quotes
+            from src.core.primitives.portfolio_context import (
+                build_portfolio_snapshot,
+            )
+
+            position_limits = {
+                p: cfg.position_limit for p, cfg in self.config.products.items()
+            }
+            remote_quotes = extract_remote_quotes(state)
+            portfolio = build_portfolio_snapshot(
+                timestamp=state.timestamp,
+                snapshots=snapshots,
+                position_limits=position_limits,
+                remote_quotes=remote_quotes,
+            )
+            # Restore engine state (idempotent across ticks — Prosperity
+            # re-enters run() freshly each tick), then step all engines.
+            self.orchestrator.restore(engine_state)
+            orch_summary = self.orchestrator.step(
+                portfolio, current_tick=state.timestamp,
+            )
+            # Orchestrator-owned products get their orders from engines,
+            # not from per-product dispatch. Pre-seed results so the
+            # returned dict shape still includes them.
+            for product, orders in orch_summary.orders_by_product.items():
+                results[product] = list(orders)
+
+        handled_products = (
+            orch_summary.handled_products if orch_summary else set()
+        )
+
         for product, snapshot in snapshots.items():
+            if product in handled_products:
+                # An engine owns this product; skip per-product dispatch
+                # to avoid conflicting orders. Engine orders are already
+                # in ``results`` from the block above.
+                continue
+
             product_config = self.config.product_config(product)
             if product_config is None:
                 results[product] = []
@@ -121,6 +226,11 @@ class Trader:
                 continue
 
             memory = engine_state.for_product(product)
+            self._maybe_flush_for_day_rollover(
+                memory=memory,
+                snapshot=snapshot,
+                product_config=product_config,
+            )
             legal_orders = self._step_product(
                 product=product,
                 snapshot=snapshot,
@@ -128,13 +238,84 @@ class Trader:
                 product_config=product_config,
                 strategy=strategy,
                 timestamp=state.timestamp,
+                portfolio=portfolio,
             )
             results[product] = legal_orders
             self._update_memory(memory, snapshot, product_config.history_length)
+            memory.counters[_LAST_SEEN_TIMESTAMP_KEY] = int(snapshot.timestamp)
+
+        # Persist engine state BEFORE state_store.save() so its budget-aware
+        # truncation sees the full engine blobs.
+        if self.orchestrator is not None:
+            self.orchestrator.persist(engine_state)
+            if orch_summary and orch_summary.errored_engines:
+                _LOG.warning(
+                    "Engines raised this tick: %s",
+                    orch_summary.errored_engines,
+                )
 
         trader_data = self.state_store.save(engine_state)
-        conversions = 0
+        conversions = orch_summary.total_conversions if orch_summary else 0
+
+        # Per-tick summary: one structured event per run() that carries
+        # the cross-cutting counters (orders per product, conversions,
+        # errored engine count, handled-product set). Lets post-mortem
+        # tooling reconstruct a round's engine behaviour from the log
+        # without re-running the replay. Cheap — a single dict append.
+        self._record_tick_summary(
+            timestamp=state.timestamp,
+            results=results,
+            conversions=conversions,
+            orch_summary=orch_summary,
+        )
+
         return results, conversions, trader_data
+
+    def _record_tick_summary(
+        self,
+        *,
+        timestamp: int,
+        results: dict[str, list[Order]],
+        conversions: int,
+        orch_summary,
+    ) -> None:
+        """Emit a compact per-tick summary into the DecisionLogger.
+
+        Fields:
+          - ``timestamp``: tick timestamp as received from Prosperity
+          - ``order_counts``: ``{product: len(orders)}`` for products
+            that emitted at least one order (empty products omitted to
+            keep the event small)
+          - ``conversions``: total conversions for this tick
+          - ``engines``: number of engines run this tick (orchestrator
+            mode only; 0 otherwise)
+          - ``engine_errors``: names of engines whose step() raised
+            this tick
+          - ``handled_products``: products owned by engines this tick
+        """
+        order_counts = {
+            product: len(orders)
+            for product, orders in results.items()
+            if orders
+        }
+        summary: dict[str, object] = {
+            "event": "tick_summary",
+            "timestamp": int(timestamp),
+            "order_counts": order_counts,
+            "conversions": int(conversions),
+        }
+        if orch_summary is not None:
+            summary["engines"] = (
+                self.orchestrator.engine_count
+                if self.orchestrator is not None else 0
+            )
+            if orch_summary.errored_engines:
+                summary["engine_errors"] = list(orch_summary.errored_engines)
+            if orch_summary.handled_products:
+                summary["handled_products"] = sorted(
+                    orch_summary.handled_products
+                )
+        self.logger.record(summary)
 
     # ---------------------------------------------------------- per-product
 
@@ -145,17 +326,43 @@ class Trader:
         snapshot: NormalizedSnapshot,
         memory: ProductMemory,
         product_config: ProductConfig,
-        strategy: BaseStrategy,
+        strategy: "BaseStrategy",
         timestamp: int,
+        portfolio=None,
     ) -> list[Order]:
+        # Lazy import: R3 bundles that skip per-product dispatch never
+        # reach this code path and therefore never load strategies.base.
+        from src.strategies.base import StrategyContext
+
+        # Observational flow scan — never alters strategy behaviour.
+        flow_report = self.flow_analyzer.scan(snapshot, memory)
+
+        # Strategies that opt into cross-product state receive the
+        # PortfolioSnapshot and the orchestrator's SignalBus via
+        # StrategyContext. Legacy single-product strategies ignore these
+        # optional fields.
+        signal_bus = (
+            self.orchestrator.signal_bus if self.orchestrator is not None else None
+        )
         context = StrategyContext(
             product=product,
             snapshot=snapshot,
             memory=memory,
             config=product_config,
+            portfolio=portfolio,
+            signal_bus=signal_bus,
         )
         intent = strategy.generate_intent(context)
         raw_orders = self.execution_engine.generate_orders(snapshot, intent, product_config)
+        raw_orders = self.residual_allocator.augment_orders(
+            product=product,
+            orders=raw_orders,
+            snapshot=snapshot,
+            fair_value=intent.fair_value.price,
+            position=snapshot.position,
+            limit=product_config.position_limit,
+            mode=intent.mode,
+        )
         legal_orders = self.risk_manager.clip_orders(
             product=product,
             orders=raw_orders,
@@ -163,18 +370,62 @@ class Trader:
             limit=product_config.position_limit,
         )
 
-        self.logger.record(
-            {
-                "timestamp": timestamp,
-                "product": product,
-                "fair_value": round(intent.fair_value.price, 4),
-                "method": intent.fair_value.method,
-                "position": snapshot.position,
-                "mode": intent.mode,
-                "orders": [(order.price, order.quantity) for order in legal_orders],
-            }
-        )
+        event: dict[str, object] = {
+            "timestamp": timestamp,
+            "product": product,
+            "fair_value": round(intent.fair_value.price, 4),
+            "method": intent.fair_value.method,
+            "position": snapshot.position,
+            "mode": intent.mode,
+            "orders": [(order.price, order.quantity) for order in legal_orders],
+        }
+        if flow_report is not None:
+            verbosity = self.config.scanner_config.verbosity
+            if verbosity >= 2:
+                event["flow_report"] = {
+                    "net_flow": flow_report.net_flow,
+                    "flow_score": flow_report.flow_score,
+                    "near_high": flow_report.near_high,
+                    "near_low": flow_report.near_low,
+                    "flags": list(flow_report.flags),
+                    "repeated_sizes": dict(flow_report.repeated_sizes),
+                }
+            elif verbosity >= 1:
+                event["scan_flags"] = list(flow_report.flags)
+        self.logger.record(event)
         return legal_orders
+
+    @staticmethod
+    def _maybe_flush_for_day_rollover(
+        *,
+        memory: ProductMemory,
+        snapshot: NormalizedSnapshot,
+        product_config: ProductConfig,
+    ) -> None:
+        """Detect a day boundary and flush stale rolling history.
+
+        IMC Prosperity restarts ``snapshot.timestamp`` at 0 on each new
+        simulated day. For products whose fair value depends on a
+        recent-mids fit (PEPPER's ``linear_drift``), retaining the
+        previous day's mids across the rollover mis-anchors the line
+        and produces large warm-up errors on the first ~30 ticks.
+
+        Detection rule: if the new ``snapshot.timestamp`` is strictly
+        less than the last one we saw for this product, the simulator
+        has rolled over. We then clear ``recent_mids`` and
+        ``recent_spreads`` so the estimator cold-starts cleanly.
+        ``counters``, ``flags`` and ``values`` are left untouched —
+        any strategy that needs day-scoped state owns its own reset.
+        """
+        if not product_config.flush_history_on_day_rollover:
+            return
+        last_seen = memory.counters.get(_LAST_SEEN_TIMESTAMP_KEY)
+        if last_seen is None:
+            return
+        if snapshot.timestamp >= last_seen:
+            return
+        memory.recent_mids.clear()
+        memory.recent_spreads.clear()
 
     @staticmethod
     def _update_memory(

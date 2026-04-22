@@ -13,16 +13,17 @@ from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
+from typing import Any, cast
 
 from src.backtest.fair_value_compare import filter_replay_to_product
 from src.backtest.metrics import ProductResult
 from src.backtest.replay_engine import ReplayEngine
 from src.backtest.simulator import BacktestSimulator
-from src.backtest.sweep import parameter_grid
+from src.backtest.sweep import GridValue, parameter_grid
 from src.core.config import EngineConfig, ProductConfig, default_engine_config
 from src.trader import Trader
 
-type SweepValue = int | float | str | bool
+type SweepValue = GridValue
 _DEFAULT_SWEEP_DIR = Path("outputs/sweeps")
 
 
@@ -34,6 +35,10 @@ class SweepRow:
     maker_share: float | None
     final_position: int
     steps_near_limit: int
+    avg_entry_edge: float | None = None
+    avg_markout_1: float | None = None
+    avg_markout_5: float | None = None
+    avg_markout_20: float | None = None
 
 
 @dataclass(frozen=True)
@@ -58,14 +63,20 @@ class ParameterSweepReport:
     def ranked_rows(self) -> list[SweepRow]:
         return sorted(
             self.rows,
-            key=lambda row: (row.pnl, -row.steps_near_limit, -abs(row.final_position), -row.trade_count),
+            key=lambda row: (
+                row.pnl,
+                -row.steps_near_limit,
+                -abs(row.final_position),
+                -row.trade_count,
+            ),
             reverse=True,
         )
 
     def summary_text(self, *, top_n: int = 10) -> str:
         header = (
             f"{'maker':>5} {'taker':>5} {'skew':>5} {'flat':>5} "
-            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4}"
+            f"{'pnl':>10} {'trades':>7} {'mk%':>6} {'near':>5} {'pos':>4} "
+            f"{'edge':>8} {'mk_1':>7} {'mk_5':>7} {'mk_20':>7}"
         )
         lines = [
             f"Parameter sweep: {self.product}",
@@ -127,7 +138,7 @@ def build_parameter_sweep_report(
 
     rows: list[SweepRow] = []
     for params in parameter_grid(grid):
-        candidate = replace(product_config, **params)
+        candidate = replace(product_config, **cast(dict[str, Any], params))
         rows.append(
             _simulate_row(
                 product_replay=product_replay,
@@ -187,6 +198,10 @@ def _simulate_row(
         maker_share=_maker_share(product_result),
         final_position=product_result.final_position,
         steps_near_limit=product_result.steps_near_limit,
+        avg_entry_edge=product_result.avg_entry_edge,
+        avg_markout_1=product_result.avg_markout_1,
+        avg_markout_5=product_result.avg_markout_5,
+        avg_markout_20=product_result.avg_markout_20,
     )
 
 
@@ -224,10 +239,15 @@ def _row_line(row: SweepRow) -> str:
     skew = row.params.get("inventory_skew", "n/a")
     flatten = row.params.get("flatten_threshold", "n/a")
     maker_share = f"{row.maker_share * 100:.1f}" if row.maker_share is not None else "n/a"
+    edge = f"{row.avg_entry_edge:+.3f}" if row.avg_entry_edge is not None else "    n/a"
+    mk_1 = f"{row.avg_markout_1:+.2f}" if row.avg_markout_1 is not None else "   n/a"
+    mk_5 = f"{row.avg_markout_5:+.2f}" if row.avg_markout_5 is not None else "   n/a"
+    mk_20 = f"{row.avg_markout_20:+.2f}" if row.avg_markout_20 is not None else "   n/a"
     return (
         f"{maker:>5} {taker:>5} {skew:>5} {flatten:>5} "
         f"{row.pnl:>10.2f} {row.trade_count:>7d} {maker_share:>6} "
-        f"{row.steps_near_limit:>5d} {row.final_position:>4d}"
+        f"{row.steps_near_limit:>5d} {row.final_position:>4d} {edge:>8} "
+        f"{mk_1:>7} {mk_5:>7} {mk_20:>7}"
     )
 
 
