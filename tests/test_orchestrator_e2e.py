@@ -224,6 +224,102 @@ def test_stat_arb_engine_reads_remote_quote_through_adapter():
 
 
 @pytest.mark.integration
+def test_trader_run_fits_in_per_tick_budget_with_multiple_engines():
+    """Regression: ``Trader.run`` must stay well under Prosperity's
+    ~900 ms per-tick budget when multiple engines are loaded.
+
+    This test instantiates three engines (basket, stat-arb,
+    counterparty-intel) and measures the **median** tick duration
+    across a slice of tutorial replay. Median (not p95) is what we
+    assert against so one first-call JIT/import overhead spike
+    doesn't cause flakes. Threshold is 300 ms — a third of the
+    platform budget, leaving headroom for CPU noise and future
+    engine additions.
+    """
+    import statistics
+    import time as _time
+
+    from src.engines.counterparty_intel import (
+        CounterpartyIntelConfig,
+        CounterpartyIntelEngine,
+    )
+
+    states = _tutorial_replay(limit_ticks=20)
+    if len(states) < 10:
+        pytest.skip("Not enough replay ticks to measure latency")
+    if "EMERALDS" not in states[0].order_depths:
+        pytest.skip("Tutorial ticks missing EMERALDS")
+
+    bus = SignalBus()
+    risk = PortfolioRiskManager()
+
+    basket_engine = BasketArbEngine(
+        spec=BasketSpec(basket="EMERALDS", weights={"TOMATOES": 1}),
+        config=BasketArbConfig(welford_warmup=3),
+        risk=risk, bus=bus,
+    )
+    stat_arb_engine = StatArbEngine(
+        config=StatArbConfig(
+            local_product="TOMATOES",
+            conversion_spec=ConversionSpec(
+                transport_fee=1.0, conv_cap_per_tick=10,
+            ),
+        ),
+        risk=risk, bus=bus,
+    )
+    cp_engine = CounterpartyIntelEngine(
+        config=CounterpartyIntelConfig(min_trades_for_classification=5),
+        bus=bus,
+    )
+
+    orch = EngineOrchestrator(
+        engines=[basket_engine, stat_arb_engine, cp_engine],
+        signal_bus=bus,
+    )
+    trader = Trader(orchestrator=orch)
+
+    # Warm up on the first tick so module-import / JIT overhead does
+    # not skew the sample (Trader.run lazy-imports a few things on
+    # first call).
+    _ = trader.run(TradingState(
+        traderData="",
+        timestamp=states[0].timestamp,
+        listings=states[0].listings,
+        order_depths=states[0].order_depths,
+        own_trades=states[0].own_trades,
+        market_trades=states[0].market_trades,
+        position=states[0].position,
+        observations=states[0].observations,
+    ))
+
+    durations_ms: list[float] = []
+    trader_data = ""
+    for s in states[1:]:
+        state = TradingState(
+            traderData=trader_data,
+            timestamp=s.timestamp, listings=s.listings,
+            order_depths=s.order_depths, own_trades=s.own_trades,
+            market_trades=s.market_trades, position=s.position,
+            observations=s.observations,
+        )
+        t0 = _time.perf_counter()
+        _orders, _conv, trader_data = trader.run(state)
+        durations_ms.append((_time.perf_counter() - t0) * 1000.0)
+
+    median_ms = statistics.median(durations_ms)
+    p95_ms = sorted(durations_ms)[int(0.95 * len(durations_ms))]
+    # Prosperity's per-tick budget is ~900 ms. Asserting 300 ms keeps
+    # comfortable headroom for CPU noise and future engine growth.
+    # Median is the primary gate; p95 is informational in the error
+    # message but not asserted against (would be flaky on shared CI).
+    assert median_ms < 300.0, (
+        f"Trader.run median {median_ms:.1f} ms exceeds 300 ms budget "
+        f"with 3 engines loaded. p95={p95_ms:.1f} ms. "
+        f"Full samples: {[round(x, 1) for x in durations_ms]}"
+    )
+
+
+@pytest.mark.integration
 def test_orchestrator_state_persists_across_trader_reinstantiation():
     """Engine state survives Trader being rebuilt from traderData.
 

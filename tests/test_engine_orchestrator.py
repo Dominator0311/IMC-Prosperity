@@ -329,6 +329,74 @@ def test_trader_skips_per_product_dispatch_for_owned_products():
 
 
 @pytest.mark.unit
+def test_trader_emits_tick_summary_event_per_run():
+    """Every Trader.run() call records exactly one ``tick_summary``
+    event into DecisionLogger, carrying the tick's cross-cutting
+    counters. Exists so post-mortem tooling can reconstruct a round's
+    engine behaviour from the log alone.
+    """
+    orch = EngineOrchestrator(engines=[])
+    trader = Trader(orchestrator=orch)
+    state = TradingState(
+        traderData="", timestamp=1234, listings={}, order_depths={},
+        own_trades={}, market_trades={}, position={},
+        observations=Observation(),
+    )
+    trader.run(state)
+    summaries = [
+        e for e in trader.logger.events if e.get("event") == "tick_summary"
+    ]
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s["timestamp"] == 1234
+    assert s["conversions"] == 0
+    assert s["order_counts"] == {}
+    assert s["engines"] == 0  # empty orchestrator
+
+
+@pytest.mark.unit
+def test_trader_tick_summary_reports_engine_errors():
+    """Engines that raise appear in ``engine_errors`` on the tick's summary."""
+    crashy = _FakeEngine(engine_id="crashy", raise_on_step=True)
+    orch = EngineOrchestrator(engines=[crashy])
+    trader = Trader(orchestrator=orch)
+    state = TradingState(
+        traderData="", timestamp=5, listings={}, order_depths={},
+        own_trades={}, market_trades={}, position={},
+        observations=Observation(),
+    )
+    trader.run(state)
+    s = [e for e in trader.logger.events if e.get("event") == "tick_summary"][0]
+    assert s["engine_errors"] == ["crashy"]
+
+
+@pytest.mark.unit
+def test_trader_tick_summary_carries_handled_products_and_order_counts():
+    """Orders emitted by engines are reflected in ``order_counts``, and
+    engine-owned products appear in ``handled_products``."""
+    engine_order = Order("XYZ", 99, 2)
+    e = _FakeEngine(
+        engine_id="e1",
+        owned=frozenset({"XYZ"}),
+        orders_to_emit=(engine_order,),
+        conversions_to_emit=3,
+    )
+    orch = EngineOrchestrator(engines=[e])
+    trader = Trader(orchestrator=orch)
+    state = TradingState(
+        traderData="", timestamp=42, listings={},
+        order_depths={"XYZ": _make_depth()},
+        own_trades={}, market_trades={},
+        position={"XYZ": 0}, observations=Observation(),
+    )
+    trader.run(state)
+    s = [e for e in trader.logger.events if e.get("event") == "tick_summary"][0]
+    assert s["order_counts"] == {"XYZ": 1}
+    assert s["handled_products"] == ["XYZ"]
+    assert s["conversions"] == 3
+
+
+@pytest.mark.unit
 def test_trader_passes_remote_quotes_from_conversion_observations():
     """ConversionObservation → RemoteQuote plumbing reaches StatArbEngine."""
     cfg = StatArbConfig(
