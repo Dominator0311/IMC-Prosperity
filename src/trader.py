@@ -27,17 +27,12 @@ import logging
 from typing import TYPE_CHECKING
 
 from src.core.config_core import EngineConfig, ProductConfig
-from src.core.execution import ExecutionEngine
 from src.core.logger import DecisionLogger
 from src.core.market_data import MarketDataAdapter
-from src.core.residual import ResidualAllocator
-from src.core.risk import RiskManager
-from src.core.signals import SignalEngine
 from src.core.state_store import StateStore
 from src.core.types import EngineState, NormalizedSnapshot, ProductMemory
 from src.core.utils import bounded_append
 from src.datamodel import Order, TradingState
-from src.signals.flow_analyzer import FlowAnalyzer
 
 # Lazy-import gate. The following modules are heavy and only needed for
 # per-product strategy dispatch. An R3 submission whose every product is
@@ -86,12 +81,26 @@ class Trader:
             max_chars=self.config.max_trader_data_chars,
         )
         self.market_data = MarketDataAdapter()
-        self.signal_engine = SignalEngine()
-        self.execution_engine = ExecutionEngine()
-        self.risk_manager = RiskManager()
-        self.residual_allocator = ResidualAllocator(self.config.residual_config)
-        self.flow_analyzer = FlowAnalyzer(self.config.scanner_config)
         self.logger = DecisionLogger()
+        # Per-product subsystems are only needed when config.products is non-empty.
+        # R3 submissions (orchestrator-owned products, products={}) skip these
+        # entirely — keeps the R3 bundle ~22 KB slimmer.
+        self.signal_engine = None
+        self.execution_engine = None
+        self.risk_manager = None
+        self.residual_allocator = None
+        self.flow_analyzer = None
+        if self.config.products:
+            from src.core.execution import ExecutionEngine
+            from src.core.residual import ResidualAllocator
+            from src.core.risk import RiskManager
+            from src.core.signals import SignalEngine
+            from src.signals.flow_analyzer import FlowAnalyzer
+            self.signal_engine = SignalEngine()
+            self.execution_engine = ExecutionEngine()
+            self.risk_manager = RiskManager()
+            self.residual_allocator = ResidualAllocator(self.config.residual_config)
+            self.flow_analyzer = FlowAnalyzer(self.config.scanner_config)
         self._reraise_exceptions = reraise_exceptions
         # Cross-product engine orchestrator (R3+). Optional: legacy R1/R2
         # runs pass None and behave exactly as before (no portfolio snapshot,

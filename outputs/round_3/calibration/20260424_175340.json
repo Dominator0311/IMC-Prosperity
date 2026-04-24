@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-04-24T17:53:40.644063",
+  "target_fill_rate": 0.15,
+  "best": {
+    "delta1": {
+      "product_class": "delta1",
+      "passive_allocation": 0.05,
+      "simulated_fills": 180000,
+      "actual_fills": 2846,
+      "fill_rate": 0.015811111111111113
+    },
+    "otm_voucher": {
+      "product_class": "otm_voucher",
+      "passive_allocation": 0.05,
+      "simulated_fills": 300000,
+      "actual_fills": 1181,
+      "fill_rate": 0.0039366666666666664
+    }
+  },
+  "full_sweep": {
+    "delta1": [
+      {
+        "product_class": "delta1",
+        "passive_allocation": 0.05,
+        "simulated_fills": 180000,
+        "actual_fills": 2846,
+        "fill_rate": 0.015811111111111113
+      },
+      {
+        "product_class": "delta1",
+        "passive_allocation": 0.1,
+        "simulated_fills": 180000,
+        "actual_fills": 2846,
+        "fill_rate": 0.015811111111111113
+      },
+      {
+        "product_class": "delta1",
+        "passive_allocation": 0.2,
+        "simulated_fills": 180000,
+        "actual_fills": 2846,
+        "fill_rate": 0.015811111111111113
+      },
+      {
+        "product_class": "delta1",
+        "passive_allocation": 0.3,
+        "simulated_fills": 180000,
+        "actual_fills": 2846,
+        "fill_rate": 0.015811111111111113
+      },
+      {
+        "product_class": "delta1",
+        "passive_allocation": 0.5,
+        "simulated_fills": 180000,
+        "actual_fills": 2846,
+        "fill_rate": 0.015811111111111113
+      }
+    ],
+    "otm_voucher": [
+      {
+        "product_class": "otm_voucher",
+        "passive_allocation": 0.05,
+        "simulated_fills": 300000,
+        "actual_fills": 1181,
+        "fill_rate": 0.0039366666666666664
+      },
+      {
+        "product_class": "otm_voucher",
+        "passive_allocation": 0.1,
+        "simulated_fills": 300000,
+        "actual_fills": 1181,
+        "fill_rate": 0.0039366666666666664
+      },
+      {
+        "product_class": "otm_voucher",
+        "passive_allocation": 0.2,
+        "simulated_fills": 300000,
+        "actual_fills": 1181,
+        "fill_rate": 0.0039366666666666664
+      },
+      {
+        "product_class": "otm_voucher",
+        "passive_allocation": 0.3,
+        "simulated_fills": 300000,
+        "actual_fills": 1181,
+        "fill_rate": 0.0039366666666666664
+      },
+      {
+        "product_class": "otm_voucher",
+        "passive_allocation": 0.5,
+        "simulated_fills": 300000,
+        "actual_fills": 1181,
+        "fill_rate": 0.0039366666666666664
+      }
+    ]
+  }
+}

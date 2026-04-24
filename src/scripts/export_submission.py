@@ -99,9 +99,16 @@ LIVE_MODULE_ORDER: tuple[str, ...] = (
 # own EngineConfig.
 def _r3_modules() -> tuple[str, ...]:
     # Drop R1/R2-only modules that an orchestrator-driven Trader never
-    # loads: the product factories, the fair-value engine (lazy-loaded
-    # only when a product has a strategy_name), and the single-product
-    # strategies. This saves ~37 KB vs shipping the full R2 base.
+    # loads. Two categories:
+    #
+    # 1. Product factories / fair-value / single-product strategies:
+    #    dropped since R3 uses orchestrator-owned products exclusively.
+    #
+    # 2. Per-product execution subsystems: SignalEngine, ExecutionEngine,
+    #    RiskManager, ResidualAllocator, FlowAnalyzer are lazy-imported in
+    #    Trader.__init__ only when config.products is non-empty. R3 ships
+    #    with products={}, so these modules are never imported at runtime
+    #    and can be dropped from the bundle.
     drop = {
         "src/core/config.py",
         "src/core/fair_value.py",
@@ -109,6 +116,14 @@ def _r3_modules() -> tuple[str, ...]:
         "src/strategies/market_making.py",
         "src/strategies/buy_and_hold.py",
         "src/strategies/__init__.py",
+        # Per-product subsystems (lazy-imported; never used when products={})
+        "src/signals/__init__.py",
+        "src/signals/flow_analyzer.py",
+        "src/core/signals.py",
+        "src/core/execution.py",
+        "src/core/residual.py",
+        # Note: src/core/risk.py is kept — portfolio_risk.py (used by engine_orchestrator)
+        # imports RiskManager from it. Dropping it fails the completeness check.
     }
     base = tuple(m for m in LIVE_MODULE_ORDER[:-1] if m not in drop)
     return base + (
@@ -122,6 +137,25 @@ def _r3_modules() -> tuple[str, ...]:
         "src/conversions/layer.py",
         "src/conversions/adapter.py",
         "src/trader.py",
+        # R3 product constants + shared primitives
+        "src/core/r3_products.py",
+        "src/core/primitives/sst.py",
+        "src/core/primitives/terminal_ramp.py",
+        "src/core/primitives/r3_delta_budget.py",
+        # Options math (BSM + smile fit)
+        "src/options/bsm.py",
+        "src/options/smile.py",
+        "src/core/primitives/smile_cache.py",
+        # R3 strategies
+        "src/strategies/round_3/__init__.py",
+        "src/strategies/round_3/hydrogel_mm.py",
+        "src/strategies/round_3/vev_4000_mm.py",
+        "src/strategies/round_3/voucher_liquidity.py",
+        "src/strategies/round_3/velvet_hedge.py",
+        "src/strategies/round_3/zero_bid_lottery.py",
+        # R3 engine + factory (factory must be last — overrides Trader)
+        "src/engines/r3_engine.py",
+        "src/engines/r3_factory.py",
     )
 
 
@@ -638,6 +672,28 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Suppress the summary line (useful for piping).",
     )
+    parser.add_argument(
+        "--profile",
+        choices=EXPORT_PROFILES,
+        default="r2",
+        help=(
+            "Module-order profile. 'r2' (default) ships the R1/R2 live path. "
+            "'r3' ships the R3 cross-product primitives + orchestrator plumbing "
+            "and drops R1/R2-only modules. Add R3 engine modules via "
+            "--extra-modules."
+        ),
+    )
+    parser.add_argument(
+        "--extra-modules",
+        nargs="*",
+        default=[],
+        metavar="MODULE",
+        help=(
+            "Additional src/... paths to append to the profile order "
+            "(e.g. src/engines/r3_engine.py). "
+            "Duplicates of profile modules are silently ignored."
+        ),
+    )
     return parser
 
 
@@ -646,6 +702,8 @@ def main(argv: list[str] | None = None) -> int:
     options = ExportOptions(
         datamodel_mode=args.datamodel,
         output_path=args.output,
+        profile=args.profile,
+        extra_modules=tuple(args.extra_modules),
     )
     bundle = build_submission_source(options)
 
