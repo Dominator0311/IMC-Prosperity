@@ -8,8 +8,10 @@ Priority when multiple engines compete for the remaining capacity:
     HYDROGEL (no delta) > VEV_4000 (delta=1.0) > OTM vouchers (delta<1)
 
 Cap schedule:
-    t <  850_000  →  soft ±80,  hard ±130
-    t >= 850_000  →  terminal ±40  (ramp in sync with TerminalRamp)
+    t <  85_000  →  soft ±80,  hard ±130
+    t >= 85_000  →  terminal ±40  (ramp in sync with TerminalRamp)
+
+    Tuned to R3 live round length: ts 0-99_900 (1000 snapshots × step 100).
 """
 
 from __future__ import annotations
@@ -26,14 +28,17 @@ from src.datamodel import Order
 
 # ------------------------------------------------------------------ caps
 
-TERMINAL_START: int = 850_000
+TERMINAL_START: int = 85_000
 
 
 @dataclass(frozen=True)
 class DeltaCaps:
-    soft: int = 80
-    hard: int = 130
-    terminal: int = 40
+    # Loosened for aggressive voucher short-premium strategy. With VELVET
+    # limit ±200 + VEV_4000 delta-1 limit ±300, total hedge capacity is
+    # ±500, so net-delta caps up to ~±400 are defensibly hedge-able.
+    soft: int = 250      # was 80
+    hard: int = 400      # was 130
+    terminal: int = 100  # was 40
 
 
 DEFAULT_CAPS: DeltaCaps = DeltaCaps()
@@ -177,7 +182,7 @@ class R3DeltaBudget:
             order_delta = qty * delta_per_unit
             new_nd = nd + order_delta
 
-            if abs(new_nd) <= cap:
+            if abs(new_nd) <= cap or abs(new_nd) < abs(nd):
                 safe.append(order)
                 nd = new_nd  # update running tally
             # else: drop this order — cap would be breached

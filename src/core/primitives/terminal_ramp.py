@@ -1,9 +1,18 @@
 """Terminal risk ramp — linear inventory-band scaling as end-of-round approaches.
 
-Plan G spec:
-  t < 850_000   → scale = 1.0  (full bands)
-  t in [850K, 950K) → scale = (950_000 - t) / 100_000  (linear decay)
-  t >= 950_000  → scale = 0.0  (fully flat)
+IMPORTANT: R3 live round end-ts is 99_900 (1,000 snapshots × step 100),
+NOT 999_900 like the historical per-day CSVs. Submission 379928 confirmed
+the round never reaches our old 850K ramp start, so we ran at full-bands
+through the final tick and ended with open VELVET/VEV_4000 positions.
+
+Current spec (tuned to live round length):
+  t <  85_000   → scale = 1.0  (full bands)
+  t in [85K, 95K) → scale = (95_000 - t) / 10_000  (linear decay)
+  t >= 95_000   → scale = 0.0  (fully flat)
+
+For backtest compatibility with 1M-tick historical days, the constants
+below can be overridden via ``configure()`` if needed. Default matches
+live R3.
 
 The ZeroBidLottery (VEV_6000 / VEV_6500) is exempt from this ramp —
 0-cost fills carry no end-of-round mark risk.
@@ -11,8 +20,8 @@ The ZeroBidLottery (VEV_6000 / VEV_6500) is exempt from this ramp —
 
 from __future__ import annotations
 
-_RAMP_START: int = 850_000
-_RAMP_END: int = 950_000
+_RAMP_START: int = 85_000
+_RAMP_END: int = 95_000
 _RAMP_WIDTH: float = float(_RAMP_END - _RAMP_START)
 
 # Products exempt from the ramp (0-cost lottery orders).

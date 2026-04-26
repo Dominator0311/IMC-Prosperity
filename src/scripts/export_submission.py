@@ -151,6 +151,7 @@ def _r3_modules() -> tuple[str, ...]:
         "src/strategies/round_3/hydrogel_mm.py",
         "src/strategies/round_3/vev_4000_mm.py",
         "src/strategies/round_3/voucher_liquidity.py",
+        "src/strategies/round_3/voucher_short_premium.py",
         "src/strategies/round_3/velvet_hedge.py",
         "src/strategies/round_3/zero_bid_lottery.py",
         # R3 engine + factory (factory must be last — overrides Trader)
@@ -161,12 +162,28 @@ def _r3_modules() -> tuple[str, ...]:
 
 R3_MODULE_ORDER: tuple[str, ...] = _r3_modules()
 
+
+def _r3_velvet_modules() -> tuple[str, ...]:
+    """Slim upload profile for isolated VELVET/options diagnostics."""
+    return (
+        "src/core/types.py",
+        "src/core/market_data.py",
+        "src/core/r3_products.py",
+        "src/options/bsm.py",
+        "src/strategies/round_3/velvet_options_rolling_iv.py",
+        "src/engines/r3_velvet_options_engine.py",
+        "src/engines/r3_velvet_options_factory.py",
+    )
+
+
+R3_VELVET_MODULE_ORDER: tuple[str, ...] = _r3_velvet_modules()
+
 DATAMODEL_PATH: str = "src/datamodel.py"
 
 DEFAULT_OUTPUT: Path = REPO_ROOT / "outputs" / "submissions" / "trader_submission.py"
 
 DATAMODEL_MODES = ("platform", "inline")
-EXPORT_PROFILES = ("r2", "r3")
+EXPORT_PROFILES = ("r2", "r3", "r3_velvet")
 
 _BANNER_RULE = "# " + "=" * 72
 
@@ -185,12 +202,15 @@ class ExportOptions:
       ``EngineOrchestrator``. Expect ~100 KB; engines (options_mm,
       basket_arb, stat_arb, counterparty_intel) are deliberately opt-in
       per submission — add them via ``extra_modules``.
+    - ``"r3_velvet"``: slim diagnostic profile for the isolated R3
+      VELVET/options research engine.
     """
 
     datamodel_mode: str = "platform"
     output_path: Path = DEFAULT_OUTPUT
     profile: str = "r2"
     extra_modules: tuple[str, ...] = ()
+    minify: bool = False
     """Extra ``src/...`` paths appended to the selected profile's order.
 
     Use for per-round engine opt-in (e.g. add
@@ -213,6 +233,8 @@ class ExportOptions:
 def _module_order_for(profile: str) -> tuple[str, ...]:
     if profile == "r3":
         return R3_MODULE_ORDER
+    if profile == "r3_velvet":
+        return R3_VELVET_MODULE_ORDER
     return LIVE_MODULE_ORDER
 
 
@@ -249,6 +271,31 @@ def _read_module(path: str, *, root: Path) -> str:
     if not full.exists():
         raise FileNotFoundError(f"Live module not found: {path}")
     return full.read_text(encoding="utf-8")
+
+
+def _minify_source(source: str, *, path: str) -> str:
+    """Minify Python source — strips docstrings, annotations, whitespace.
+
+    Requires ``python-minifier`` (``pip install python-minifier``).
+    Gracefully falls back to the original source if the library is absent
+    or if minification fails on a specific file.
+    """
+    try:
+        import python_minifier  # type: ignore[import]
+    except ImportError:
+        return source
+    try:
+        return python_minifier.minify(
+            source,
+            remove_annotations=True,
+            remove_pass=True,
+            remove_literal_statements=True,
+            rename_locals=False,
+            hoist_literals=False,
+            filename=path,
+        )
+    except Exception:
+        return source
 
 
 def _import_line_range(node: ast.stmt) -> range:
@@ -617,6 +664,13 @@ def build_submission_source(
 
     source = "\n\n".join(part for part in parts if part).rstrip() + "\n"
 
+    # Minify AFTER assembly so that all src.* imports have already been
+    # stripped. Minifying individual files first causes strip_module to
+    # delete business-logic lines that the minifier co-located on the
+    # same physical line as a from-src import (semicolon-joined).
+    if options.minify:
+        source = _minify_source(source, path="<bundle>")
+
     return Bundle(
         source=source,
         module_count=len(stripped_modules),
@@ -694,6 +748,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Duplicates of profile modules are silently ignored."
         ),
     )
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help=(
+            "Minify each source module before bundling: strips docstrings, "
+            "type annotations, and comments. Requires python-minifier. "
+            "Reduces bundle size by ~55%%. Use for submissions where the "
+            "platform enforces a size limit."
+        ),
+    )
     return parser
 
 
@@ -704,6 +768,7 @@ def main(argv: list[str] | None = None) -> int:
         output_path=args.output,
         profile=args.profile,
         extra_modules=tuple(args.extra_modules),
+        minify=args.minify,
     )
     bundle = build_submission_source(options)
 

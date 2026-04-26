@@ -38,10 +38,16 @@ from src.strategies.round_3.hydrogel_mm import hydrogel_orders
 from src.strategies.round_3.vev_4000_mm import vev4000_orders
 from src.strategies.round_3.velvet_hedge import velvet_hedge_orders
 from src.strategies.round_3.voucher_liquidity import voucher_liquidity_orders
+from src.strategies.round_3.voucher_short_premium import (
+    voucher_short_premium_orders,
+)
 from src.strategies.round_3.zero_bid_lottery import (
     detect_acceptance,
     zero_bid_orders,
 )
+
+_R3_ENABLE_VEV4000: bool = False
+_R3_ENABLE_VELVET_HEDGE: bool = False
 
 
 class R3Engine:
@@ -57,6 +63,13 @@ class R3Engine:
         self._tick_count: int = 0
         self._zero_bid_accepted: bool | None = None
         self._prev_positions: dict[str, int] = {}
+        # EWMA of VELVET mid, used as mean-reversion fair for VELVET and VEV_4000.
+        # Seed with the historical long-run mean (~5260); adapts to live drift.
+        self._velvet_ewma: float = 5260.0
+        # EWMA halflife (in ticks). 200 ticks = ~same as AR(1) half-life.
+        # Small enough to adapt intra-round, large enough to smooth micro-noise.
+        self._velvet_ewma_alpha: float = 1.0 - 0.5 ** (1.0 / 200.0)
+        self._hydrogel_cycle_state: dict = {}
 
     # ========================================================= protocol
 
@@ -75,6 +88,8 @@ class R3Engine:
             "delta_budget": self._delta_budget.to_state(),
             "smile_cache": self._smile_cache.snapshot(),
             "prev_positions": dict(self._prev_positions),
+            "velvet_ewma": self._velvet_ewma,
+            "hydrogel_cycle_state": dict(self._hydrogel_cycle_state),
         }
 
     def from_state(self, blob: dict) -> None:
@@ -95,6 +110,12 @@ class R3Engine:
             prev = blob.get("prev_positions", {})
             if isinstance(prev, dict):
                 self._prev_positions = {str(k): int(v) for k, v in prev.items()}
+            velvet_ewma = blob.get("velvet_ewma")
+            if velvet_ewma is not None:
+                self._velvet_ewma = float(velvet_ewma)
+            hydrogel_cycle_state = blob.get("hydrogel_cycle_state", {})
+            if isinstance(hydrogel_cycle_state, dict):
+                self._hydrogel_cycle_state = dict(hydrogel_cycle_state)
         except (TypeError, ValueError, KeyError):
             pass  # cold-start on corruption
 
@@ -118,7 +139,7 @@ class R3Engine:
             p: portfolio.position_of(p) for p in ALL_R3_PRODUCTS
         }
 
-        # ---- 1. Update smile cache ----
+        # ---- 1. Update smile cache + VELVET EWMA ----
         if velvet_snap is not None and velvet_snap.mid is not None:
             spot = float(velvet_snap.mid)
             strike_mids: dict[int, float] = {}
@@ -133,6 +154,11 @@ class R3Engine:
                 d = self._smile_cache.delta(k)
                 if d is not None:
                     self._delta_budget.set_strike_delta(k, d)
+
+            # Update rolling VELVET EWMA (used as mean-reversion fair for
+            # VELVET and VEV_4000).
+            a = self._velvet_ewma_alpha
+            self._velvet_ewma = a * spot + (1.0 - a) * self._velvet_ewma
         else:
             spot = None
 
@@ -143,11 +169,18 @@ class R3Engine:
         if hydrogel_snap is not None:
             hydrogel_pos = positions.get(HYDROGEL_PACK, 0)
             intended.extend(
-                hydrogel_orders(hydrogel_snap, hydrogel_pos, ts)
+                hydrogel_orders(
+                    hydrogel_snap,
+                    hydrogel_pos,
+                    ts,
+                    cycle_state=self._hydrogel_cycle_state,
+                )
             )
 
-        # B. VEV_4000 MM + sub-intrinsic guard
-        if vev4000_snap is not None and velvet_snap is not None:
+        # B. VEV_4000 mean-reversion MM (fair = VELVET_ewma − 4000 + buffer)
+        # Disabled for the HYDROGEL isolation candidate. Official 413315 had
+        # VEV_4000 at -1.64k while HYDROGEL carried the run.
+        if _R3_ENABLE_VEV4000 and vev4000_snap is not None and velvet_snap is not None:
             vev4000_pos = positions.get("VEV_4000", 0)
             delta_remaining = self._delta_budget.remaining_capacity(
                 ts, positions, spot
@@ -159,22 +192,37 @@ class R3Engine:
                     vev4000_pos,
                     ts,
                     delta_remaining=delta_remaining,
+                    velvet_mean=self._velvet_ewma,
                 )
             )
 
-        # C. Voucher tiny-liquidity K=5400, K=5500 — DISABLED
-        # LOO validation fails all 3 held-out days (-66, -64, -78).
-        # K=5400 net edge = -1.0/fill (spread 0.5 < delta*VELVET_spread*0.5 = 1.5).
-        # K=5500 marginal (+0.25/fill, expected ~+150 total). Not worth the delta risk.
-        # voucher_liquidity_orders retained in code for future reactivation if market
-        # structure changes (wider spread or lower VELVET vol).
+        # C. Voucher passive liquidity — DISABLED.
+        # Submission 381248 showed voucher_liquidity BIDS on K=5300/5400/5500
+        # were filling and COVERING our short-premium shorts, destroying the
+        # edge. These two strategies can't coexist on the same strikes.
+        # Short-premium wins (higher EV per dollar of risk) — keep it alone.
+        # Code retained below for potential re-enablement on orthogonal strikes.
+        pass  # voucher_liquidity not called
 
-        # D. VELVET hedge
-        if velvet_snap is not None:
+        # C2. Voucher SHORT-PREMIUM — DISABLED.
+        # Submission 381639 confirmed Prosperity marks positions at CLOSE_MID
+        # (not intrinsic). OTM vouchers barely decay over 1K ticks, so the
+        # short-hold-to-end strategy earns <$200 total. Not worth the
+        # directional risk. Code retained in file for historical reference.
+
+        # D. VELVET mean-reversion + hedge (fair = VELVET_ewma with delta skew)
+        # Disabled with VEV_4000 so the next upload measures HYDROGEL alone.
+        if _R3_ENABLE_VELVET_HEDGE and velvet_snap is not None:
             velvet_pos = positions.get(VELVETFRUIT_EXTRACT, 0)
             net_delta = self._delta_budget.net_delta(positions, spot)
             intended.extend(
-                velvet_hedge_orders(velvet_snap, velvet_pos, net_delta, ts)
+                velvet_hedge_orders(
+                    velvet_snap,
+                    velvet_pos,
+                    net_delta,
+                    ts,
+                    rolling_mean=self._velvet_ewma,
+                )
             )
 
         # E. Zero-bid lottery (exempt from delta budget — no delta)

@@ -38,6 +38,7 @@ from src.scripts.export_submission import (
     EXPORT_PROFILES,
     LIVE_MODULE_ORDER,
     R3_MODULE_ORDER,
+    R3_VELVET_MODULE_ORDER,
     ExportOptions,
     build_submission_source,
     strip_module,
@@ -573,7 +574,7 @@ def test_validator_platform_bundle_has_no_inline_warning() -> None:
 
 @pytest.mark.unit
 def test_export_profiles_enumerate_expected_values() -> None:
-    assert set(EXPORT_PROFILES) == {"r2", "r3"}
+    assert set(EXPORT_PROFILES) == {"r2", "r3", "r3_velvet"}
 
 
 @pytest.mark.unit
@@ -693,6 +694,19 @@ def test_r3_bundle_size_is_tracked() -> None:
     assert bundle.size_bytes < 200 * 1024, (
         f"R3 bundle has grown to {bundle.size_bytes}B; trim before shipping"
     )
+
+
+@pytest.mark.unit
+def test_r3_velvet_profile_is_upload_sized() -> None:
+    bundle = build_submission_source(
+        ExportOptions(datamodel_mode="platform", profile="r3_velvet"),
+    )
+    report = validate_source(bundle.source)
+    assert report.ok, report.format()
+    assert bundle.module_count == len(R3_VELVET_MODULE_ORDER)
+    assert bundle.size_bytes < MAX_SIZE_BYTES
+    assert "# src/engines/r3_velvet_options_factory.py" in bundle.source
+    assert "HYDROGEL_PACK MM" not in bundle.source
 
 
 @pytest.mark.unit

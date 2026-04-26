@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from src.datamodel import Order
 
-_LOTTERY_STRIKES: tuple[int, ...] = (6000, 6500)
-_POSITION_LIMIT: int = 300
-_PROBE_TICKS: int = 10
+# Disabled — the short-premium strategy shorts these strikes for much
+# higher EV. Keep module in place (no-op) so other wiring still works.
+_ZERO_BID_STRIKES: tuple[int, ...] = ()
+_ZERO_BID_POS_LIMIT: int = 300
+_ZERO_BID_PROBE_TICKS: int = 10
 
 
 def zero_bid_orders(
@@ -34,10 +36,10 @@ def zero_bid_orders(
         return []
 
     orders: list[Order] = []
-    for k in _LOTTERY_STRIKES:
+    for k in _ZERO_BID_STRIKES:
         symbol = f"VEV_{k}"
         pos = positions.get(symbol, 0)
-        remaining = _POSITION_LIMIT - pos
+        remaining = _ZERO_BID_POS_LIMIT - pos
         if remaining > 0:
             orders.append(Order(symbol, 0, remaining))
 
@@ -57,14 +59,14 @@ def detect_acceptance(
         True  — at least one VEV_6000/6500 position changed (accepted)
         False — probe window elapsed, no change (rejected or no fills)
     """
-    if tick_count < _PROBE_TICKS:
-        for k in _LOTTERY_STRIKES:
+    if tick_count < _ZERO_BID_PROBE_TICKS:
+        for k in _ZERO_BID_STRIKES:
             symbol = f"VEV_{k}"
             if positions_after.get(symbol, 0) > positions_before.get(symbol, 0):
                 return True
         return None  # still probing
     # Probe window elapsed with no fills
-    for k in _LOTTERY_STRIKES:
+    for k in _ZERO_BID_STRIKES:
         symbol = f"VEV_{k}"
         if positions_after.get(symbol, 0) > 0:
             return True

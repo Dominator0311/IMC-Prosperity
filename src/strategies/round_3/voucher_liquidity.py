@@ -25,12 +25,18 @@ class VoucherSpec:
     hard_cap: int
 
 
-_VOUCHER_SPECS: tuple[VoucherSpec, ...] = (
-    VoucherSpec(strike=5400, soft_cap=50, hard_cap=100),
-    VoucherSpec(strike=5500, soft_cap=100, hard_cap=150),
+_VOUCHER_LIQ_SPECS: tuple[VoucherSpec, ...] = (
+    # Liquidity provision on liquid voucher strikes. NOTE: the ShortPremium
+    # strategy takes SHORT positions on these; this strategy absorbs any
+    # BID-side public flow that hits us (making us long). The combination
+    # means we may have a bid at best (from here) and an ask at best (from
+    # short-premium) simultaneously. Both cap cumulative position.
+    VoucherSpec(strike=5300, soft_cap=50, hard_cap=100),
+    VoucherSpec(strike=5400, soft_cap=100, hard_cap=200),
+    VoucherSpec(strike=5500, soft_cap=150, hard_cap=300),
 )
 
-_POSITION_LIMIT: int = 300
+_VOUCHER_LIQ_POS_LIMIT: int = 300
 
 
 def voucher_liquidity_orders(
@@ -52,7 +58,7 @@ def voucher_liquidity_orders(
     corrupted = corrupted or set()
     orders: list[Order] = []
 
-    for spec in _VOUCHER_SPECS:
+    for spec in _VOUCHER_LIQ_SPECS:
         k = spec.strike
         symbol = f"VEV_{k}"
         snap: NormalizedSnapshot | None = snapshots.get(k)

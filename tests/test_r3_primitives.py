@@ -53,30 +53,31 @@ class TestR3Products:
 
 @pytest.mark.unit
 class TestTerminalRamp:
+    # R3 live round ends at ts=99_900. Ramp tuned: 85K → 95K.
     def test_before_ramp(self):
         from src.core.primitives.terminal_ramp import scale_factor
         assert scale_factor(0) == 1.0
-        assert scale_factor(849_999) == 1.0
+        assert scale_factor(84_999) == 1.0
 
     def test_after_ramp(self):
         from src.core.primitives.terminal_ramp import scale_factor
-        assert scale_factor(950_000) == 0.0
-        assert scale_factor(999_900) == 0.0
+        assert scale_factor(95_000) == 0.0
+        assert scale_factor(99_900) == 0.0
 
     def test_mid_ramp_linear(self):
         from src.core.primitives.terminal_ramp import scale_factor
-        sf = scale_factor(900_000)
+        sf = scale_factor(90_000)
         assert sf == pytest.approx(0.5, abs=1e-9)
 
     def test_at_ramp_start(self):
         from src.core.primitives.terminal_ramp import scale_factor
-        assert scale_factor(850_000) == pytest.approx(1.0, abs=1e-9)
+        assert scale_factor(85_000) == pytest.approx(1.0, abs=1e-9)
 
     def test_scaled_cap_reduces(self):
         from src.core.primitives.terminal_ramp import scaled_cap
         assert scaled_cap(200, 0) == 200
-        assert scaled_cap(200, 900_000) == 100
-        assert scaled_cap(200, 950_000) >= 1  # minimum 1
+        assert scaled_cap(200, 90_000) == 100
+        assert scaled_cap(200, 95_000) >= 1  # minimum 1
 
 
 # ================================================================ r3_delta_budget
@@ -123,9 +124,9 @@ class TestR3DeltaBudget:
     def test_enforce_blocks_excess_delta(self):
         from src.datamodel import Order
         budget = self._make_budget()
-        # Put 120 units of VELVET already in portfolio (approaching hard cap 130)
-        positions = {"VELVETFRUIT_EXTRACT": 120}
-        # This order would push delta to 120 + 20 = 140 > 130
+        # Put 390 units of VELVET (approaching new hard cap 400).
+        positions = {"VELVETFRUIT_EXTRACT": 390}
+        # This order would push delta to 390 + 20 = 410 > 400 hard cap
         orders = [Order("VELVETFRUIT_EXTRACT", 5250, 20)]
         safe = budget.enforce(orders, 0, positions)
         assert len(safe) == 0
@@ -133,19 +134,19 @@ class TestR3DeltaBudget:
     def test_enforce_allows_within_cap(self):
         from src.datamodel import Order
         budget = self._make_budget()
-        positions = {"VELVETFRUIT_EXTRACT": 100}
-        # 100 + 10 = 110 < 130 hard cap
-        orders = [Order("VELVETFRUIT_EXTRACT", 5250, 10)]
+        positions = {"VELVETFRUIT_EXTRACT": 300}
+        # 300 + 50 = 350 < 400 hard cap
+        orders = [Order("VELVETFRUIT_EXTRACT", 5250, 50)]
         safe = budget.enforce(orders, 0, positions)
         assert len(safe) == 1
 
     def test_terminal_cap_enforced(self):
         from src.datamodel import Order
         budget = self._make_budget()
-        positions = {"VELVETFRUIT_EXTRACT": 50}
-        # After t=850_000, cap drops to 40. 50 + 10 = 60 > 40 → blocked.
-        orders = [Order("VELVETFRUIT_EXTRACT", 5250, 10)]
-        safe = budget.enforce(orders, 900_000, positions)
+        positions = {"VELVETFRUIT_EXTRACT": 90}
+        # After t=85_000, cap drops to terminal=100. 90 + 20 = 110 > 100 → blocked.
+        orders = [Order("VELVETFRUIT_EXTRACT", 5250, 20)]
+        safe = budget.enforce(orders, 90_000, positions)
         assert len(safe) == 0
 
     def test_set_strike_delta_vev4000_unchanged(self):
@@ -264,6 +265,60 @@ class TestHydrogelMM:
         # Terminal ramp should reduce or maintain order count
         assert len(orders_terminal) <= len(orders_normal) + 1
 
+    def test_no_forced_flatten_long_near_old_mean(self):
+        """Wide static-MR should not force-flatten at the active anchor."""
+        from src.strategies.round_3.hydrogel_mm import hydrogel_orders
+        snap = self._make_snapshot(9953, 9957)
+        orders = hydrogel_orders(snap, position=150, timestamp=10_000)
+        single_flatten = (
+            len(orders) == 1
+            and orders[0].quantity == -150
+            and orders[0].price == 9953
+        )
+        assert not single_flatten
+
+    def test_no_forced_flatten_short_near_old_mean(self):
+        """Wide static-MR should not force-flatten at the active anchor."""
+        from src.strategies.round_3.hydrogel_mm import hydrogel_orders
+        snap = self._make_snapshot(9988, 9992)
+        orders = hydrogel_orders(snap, position=-120, timestamp=10_000)
+        single_flatten = (
+            len(orders) == 1
+            and orders[0].quantity == 120
+            and orders[0].price == 9992
+        )
+        assert not single_flatten
+
+    def test_small_position_uses_normal_sst_logic(self):
+        """Small positions use SST logic, not a special flatten override."""
+        from src.strategies.round_3.hydrogel_mm import hydrogel_orders
+        snap = self._make_snapshot(9953, 9957)
+        orders = hydrogel_orders(snap, position=15, timestamp=10_000)
+        if len(orders) == 1:
+            assert orders[0].quantity != -15
+
+    def test_rebound_long_exits_on_upper_band(self):
+        """Rebound-cycle long positions exit above 9988+35."""
+        from src.strategies.round_3.hydrogel_mm import hydrogel_orders
+        snap = self._make_snapshot(10027, 10031)
+        state = {"long_mode": True}
+        orders = hydrogel_orders(snap, position=14, timestamp=10_000, cycle_state=state)
+        assert len(orders) == 1
+        assert orders[0].quantity == -14
+        assert orders[0].price == 10027
+        assert state["long_mode"] is False
+
+    def test_cycle_reset_covers_short_on_lower_band(self):
+        """Completed short cycle is actively reduced below 9988-8."""
+        from src.strategies.round_3.hydrogel_mm import hydrogel_orders
+        snap = self._make_snapshot(9938, 9942)
+        state = {}
+        orders = hydrogel_orders(snap, position=-120, timestamp=10_000, cycle_state=state)
+        assert len(orders) == 1
+        assert orders[0].quantity == 120
+        assert orders[0].price == 9942
+        assert state["long_mode"] is True
+
 
 @pytest.mark.unit
 class TestVev4000MM:
@@ -300,12 +355,40 @@ class TestVev4000MM:
         for o in ask_orders:
             assert o.price >= 1249, f"Ask {o.price} below intrinsic+1=1249"
 
+    def test_profit_take_flattens_long_near_mean(self):
+        """v7: VEV_4000 mid near (velvet_mean−4000) AND |pos|≥40 → flatten."""
+        from src.strategies.round_3.vev_4000_mm import vev4000_orders
+        # velvet_mean=5250 → fair=1250. vev_mid=1250 (at fair). pos=+100.
+        velvet_snap = self._make_snap(5248, 5252, "VELVETFRUIT_EXTRACT")
+        vev_snap = self._make_snap(1248, 1252)  # mid=1250
+        orders = vev4000_orders(
+            vev_snap, velvet_snap, position=100, timestamp=0, velvet_mean=5250.0
+        )
+        assert len(orders) == 1
+        assert orders[0].quantity == -100
+        assert orders[0].price == 1248
+
+    def test_profit_take_skipped_without_velvet_mean(self):
+        """v7: profit-take only fires when velvet_mean anchor is provided."""
+        from src.strategies.round_3.vev_4000_mm import vev4000_orders
+        velvet_snap = self._make_snap(5248, 5252, "VELVETFRUIT_EXTRACT")
+        vev_snap = self._make_snap(1248, 1252)
+        orders = vev4000_orders(
+            vev_snap, velvet_snap, position=100, timestamp=0, velvet_mean=None
+        )
+        # No flatten pattern
+        single_flatten = (
+            len(orders) == 1 and orders[0].quantity == -100
+        )
+        assert not single_flatten
+
 
 @pytest.mark.unit
 class TestTerminalRampIntegration:
     def test_scale_values_at_key_timestamps(self):
         from src.core.primitives.terminal_ramp import scale_factor
-        assert scale_factor(840_000) == pytest.approx(1.0)
-        assert scale_factor(860_000) == pytest.approx(0.9)
-        assert scale_factor(900_000) == pytest.approx(0.5)
-        assert scale_factor(950_000) == pytest.approx(0.0)
+        # Tuned to live round length (1000 snapshots × step 100 = ts 0-99_900)
+        assert scale_factor(84_000) == pytest.approx(1.0)
+        assert scale_factor(86_000) == pytest.approx(0.9)
+        assert scale_factor(90_000) == pytest.approx(0.5)
+        assert scale_factor(95_000) == pytest.approx(0.0)
