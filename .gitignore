@@ -14,7 +14,32 @@ venv/
 
 notebooks/.ipynb_checkpoints/
 
-# Large generated research/simulator artifacts. Keep these locally and document
-# them in docs/round_3/ARTIFACT_INVENTORY.md instead of committing hundreds of
-# MB of replay outputs into git history.
-outputs/round_3/**
+# Large generated research/simulator artifacts. Keep locally; do not commit
+# hundreds of MB of replay outputs / sim zips into git history. Each round's
+# inventory is documented under docs/round_<N>/.
+outputs/round_1/
+outputs/round_2/
+outputs/round_3/
+outputs/round_4/
+outputs/review_packs/
+
+# Round 4 simulator artifacts (zips + extracted JSON/log/py per upload).
+r4 Sim Results/
+Manual r4 test/
+
+# Legacy round folders kept on disk for reference but not in git.
+ROUND 1/
+ROUND_3/
+Tutorial/
+
+# External backtester clones / third-party tooling.
+external/
+
+# IMC reference materials (large binaries, kept on disk only).
+*.html
+*.pdf
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
