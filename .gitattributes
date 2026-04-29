@@ -1,0 +1,11 @@
+# Keep generated/reference files from dominating GitHub language statistics.
+*.html linguist-vendored
+*.pdf linguist-vendored
+data/**/*.csv linguist-vendored
+ROUND_3/**/*.csv linguist-vendored
+Tutorial/**/*.csv linguist-vendored
+
+# Generated submission bundles are intentionally treated as generated artifacts
+# when included in an archive after the competition.
+outputs/submissions/**/*.py linguist-generated
+submissions/archive/**/*.py linguist-generated

@@ -11,20 +11,26 @@ This repository is built around a simple idea:
 - encode market logic through explicit modules
 - optimize only after correctness and interpretability exist
 
-The architectural principles are defined in [ARCHITECTURE_DOCTRINE.md](/Users/abhinavgupta/Desktop/IMC/ARCHITECTURE_DOCTRINE.md).
+The architectural principles are defined in [ARCHITECTURE_DOCTRINE.md](ARCHITECTURE_DOCTRINE.md).
 
 ## Current Scope
 
 The repository currently contains:
 
 - the architecture doctrine
-- the official algorithm guide export
 - tutorial research and planning notes
 - a reusable project skeleton for the live bot and offline harness
 - tutorial CSVs copied into `data/raw/tutorial_round_1`
 - a **manual-round toolkit** (`src/manual_rounds/`) with solvers for
   the five recurring manual-round families (graph, bid, crowding,
   hybrid, portfolio) and round-day CLI runners
+- public historical-data analysis and reusable research scripts for
+  IMC Prosperity rounds
+
+Final live-round submission bundles and official result artifacts are
+withheld while the competition is in progress. Public placeholders live under
+[`submissions/`](submissions/), and curated Round 5 notes live under
+[`docs/round_5_public/`](docs/round_5_public/).
 
 This is the foundation for building:
 
@@ -133,7 +139,6 @@ order. Start with:
 
 ## Other Important Files
 
-- [Writing an Algorithm in Python.html](Writing%20an%20Algorithm%20in%20Python.html)
 - [Implementation Plan.md](Tutorial/Implementation%20Plan.md)
 - [Manual Strategy Plan.md](Tutorial/Manual%20Strategy%20Plan.md)
 - [deep-research-report.md](Tutorial/deep-research-report.md)

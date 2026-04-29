@@ -15,13 +15,9 @@ venv/
 notebooks/.ipynb_checkpoints/
 
 # Large generated research/simulator artifacts. Keep locally; do not commit
-# hundreds of MB of replay outputs / sim zips into git history. Each round's
-# inventory is documented under docs/round_<N>/.
-outputs/round_1/
-outputs/round_2/
-outputs/round_3/
-outputs/round_4/
-outputs/review_packs/
+# replay outputs, official-result logs, generated submissions, or sim zips.
+# Curate public charts/writeups into docs/ instead of dumping raw outputs/.
+outputs/
 
 # Round 4 simulator artifacts (zips + extracted JSON/log/py per upload).
 r4 Sim Results/
@@ -39,6 +35,9 @@ external/
 *.html
 *.pdf
 
+# Local planning notes that are not curated public documentation.
+Optimisation_Plan_*.md
+
 # Editor / IDE
 .vscode/
 .idea/
@@ -46,3 +45,40 @@ external/
 
 # Local Claude Code state (settings + scheduled task locks).
 .claude/
+
+# Local agent/session/handoff files. These are workspace instructions and
+# working-memory notes, not public project documentation.
+AGENTS.md
+CLAUDE.md
+**/HANDOFF*.md
+**/*HANDOFF*.md
+**/SESSION*.md
+**/*SESSION*.md
+docs/round_5/sessions/
+docs/round_5/MASTER_INTEGRATION_LOG.md
+docs/round_5/*.md
+!docs/round_5/ROUND_4_LESSONS_FOR_ROUND_5.md
+!docs/round_5/ROUND_5_SETUP.md
+manual r5 analysis/
+docs/manual_round_2/external_inputs/
+docs/round_1/official_results_analysis.md
+docs/round_1/upload_plan.md
+docs/round_3/CALIBRATION_RESULT.md
+docs/round_3/MANUAL_SUBMISSION.md
+docs/round_4/*OFFICIAL*.md
+docs/round_4/*READOUT*.md
+docs/round_4/*UPLOAD*.md
+docs/round_4/DISCORD*.md
+
+# Live/final-round private artifacts. Publish curated writeups and placeholders
+# first; release final submissions/results only after the competition ends.
+outputs/round_5/
+data/raw/round_5/
+src/scripts/round_5/
+tests/test_r5_*.py
+
+# Submission/result artifacts should be curated into top-level submissions/
+# before publication, not dumped from generated outputs/.
+outputs/submissions/
+outputs/calibration/
+r4 Sim Results/
