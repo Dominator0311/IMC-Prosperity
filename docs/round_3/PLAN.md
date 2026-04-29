@@ -1,6 +1,6 @@
 # R3 Product Review and Alpha-Extraction Plan (v3 — post delta-hedge reality check)
 
-**Scope:** every tradable product in R3, what it is, how it behaves, what alpha it offers, and why. All numbers verified against `ROUND_3/` day-0/1/2 CSVs.
+**Scope:** every tradable product in R3, what it is, how it behaves, what alpha it offers, and why. All numbers verified against `data/raw/round_3/` day-0/1/2 CSVs.
 
 **Status:** v3 supersedes v2. Key changes from v2:
 - **Voucher complex downgraded.** Delta-hedged passive MM on K=5300/5400 is net-negative after hedge cost. Only K=5400/5500 as tiny passive liquidity; K=5300 dropped. Expected voucher P&L cut from ~+1k to ~+150.

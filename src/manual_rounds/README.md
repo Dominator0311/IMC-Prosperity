@@ -1,7 +1,7 @@
 # manual_rounds/
 
 Reusable solvers for the five recurring manual-round families in IMC
-Prosperity. Mirrors `Tutorial/Manual Strategy Plan.md`. Each solver is
+Prosperity. Mirrors `docs/tutorial/manual_strategy_plan.md`. Each solver is
 small, dependency-free (stdlib only), and heavily unit-tested against
 known answers from public Prosperity 2 and 3 writeups.
 

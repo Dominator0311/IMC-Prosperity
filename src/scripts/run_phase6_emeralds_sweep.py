@@ -9,7 +9,7 @@ plus per-slice incumbent baseline block.
 Heatmaps are rendered per slice as a diagnostic but are
 **non-blocking** — the script still writes the core
 ``plateau_intersection.{json,txt}`` artifacts if the renderer
-trips. See the Phase 6 plan (``Tutorial/Implementation Plan.md:649``)
+trips. See the Phase 6 plan (``docs/tutorial/implementation_plan.md``)
 and the robustness note (``docs/phase_6_robustness_note.md``) for
 context.
 """

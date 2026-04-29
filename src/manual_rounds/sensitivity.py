@@ -9,11 +9,11 @@ canonical scenarios instead of a single point estimate:
 - ``robust``      — the answer whose worst-case value across the three
                     above is largest.
 
-This mirrors the validation protocol in ``Tutorial/Manual Strategy
-Plan.md`` and the parameter-plateau discipline the top Prosperity teams
-describe in their postmortems. The point is never to ship the single
-"best" answer — it is to ship the answer that still works when the
-assumptions miss.
+This mirrors the validation protocol in
+``docs/tutorial/manual_strategy_plan.md`` and the parameter-plateau
+discipline the top Prosperity teams describe in their postmortems. The
+point is never to ship the single "best" answer — it is to ship the
+answer that still works when the assumptions miss.
 """
 
 from __future__ import annotations

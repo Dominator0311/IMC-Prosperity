@@ -18,9 +18,9 @@ The architectural principles are defined in [ARCHITECTURE_DOCTRINE.md](ARCHITECT
 The repository currently contains:
 
 - the architecture doctrine
-- tutorial research and planning notes
+- tutorial research and planning notes under `docs/tutorial/`
 - a reusable project skeleton for the live bot and offline harness
-- tutorial CSVs copied into `data/raw/tutorial_round_1`
+- public replay CSVs under `data/raw/` for tutorial and available rounds
 - a **manual-round toolkit** (`src/manual_rounds/`) with solvers for
   the five recurring manual-round families (graph, bid, crowding,
   hybrid, portfolio) and round-day CLI runners
@@ -45,9 +45,15 @@ This is the foundation for building:
 ```text
 data/
   raw/
-  processed/
+    tutorial_round_1/
+    round_1/
+    round_2/
+    round_3/
+    round_4/
+    round_5/
 
 docs/
+  tutorial/
   manual_round_playbook.md
   manual_round_agent_brief.md
 
@@ -139,6 +145,6 @@ order. Start with:
 
 ## Other Important Files
 
-- [Implementation Plan.md](Tutorial/Implementation%20Plan.md)
-- [Manual Strategy Plan.md](Tutorial/Manual%20Strategy%20Plan.md)
-- [deep-research-report.md](Tutorial/deep-research-report.md)
+- [Tutorial implementation plan](docs/tutorial/implementation_plan.md)
+- [Tutorial manual strategy plan](docs/tutorial/manual_strategy_plan.md)
+- [Tutorial deep research report](docs/tutorial/deep_research_report.md)

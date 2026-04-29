@@ -5,7 +5,7 @@ answering a higher-level question before tuning: which class of HYDROGEL
 strategy is worth implementing?
 
 It evaluates families on:
-  - Historical R3 CSV days 0/1/2 from ROUND_3/
+  - Historical R3 CSV days 0/1/2 from data/raw/round_3/
   - Official live result logs when present (especially v7.zip extraction)
 
 Families are deliberately broad:
@@ -39,7 +39,7 @@ import pandas as pd
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = REPO_ROOT / "ROUND_3"
+DATA_DIR = REPO_ROOT / "data/raw/round_3"
 RESULTS_DIR = REPO_ROOT / "outputs" / "round_3" / "Results"
 OUT_DIR = REPO_ROOT / "outputs" / "round_3" / "hydrogel_family_sweep"
 

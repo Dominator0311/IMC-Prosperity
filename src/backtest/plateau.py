@@ -7,7 +7,7 @@ sub-sweeps to pick a single product-level winner.
 
 The doctrine reference is ``ARCHITECTURE_DOCTRINE.md`` §8 — prefer
 broad plateaus to peak settings — and the Phase 6 plan spec in
-``Tutorial/Implementation Plan.md:649``.
+``docs/tutorial/implementation_plan.md``.
 
 This module is deliberately decoupled from ``BacktestSimulator`` and
 ``ReplayEngine``: every function takes ``ParameterSweepReport``

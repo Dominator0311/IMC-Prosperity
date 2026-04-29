@@ -1,7 +1,7 @@
 # Phase 6 — Parameter sweeps and robustness testing
 
 Phase 6 of the implementation plan
-(`Tutorial/Implementation Plan.md:649`) is "Parameter sweeps and
+(`docs/tutorial/implementation_plan.md`) is "Parameter sweeps and
 robustness testing", with the explicit rule: **prefer stable
 parameter regions, not the single highest backtest peak**. The
 "done when" criteria are a recommended baseline config for both

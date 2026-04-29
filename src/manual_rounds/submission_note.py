@@ -1,7 +1,7 @@
 """Structured submission-note builder.
 
 Every manual-round answer must pass the validation protocol in
-``Tutorial/Manual Strategy Plan.md``: chosen answer, core assumptions,
+``docs/tutorial/manual_strategy_plan.md``: chosen answer, core assumptions,
 backup answer, biggest risk. This module renders that checklist into
 a markdown note that can be pasted into the team's notes folder or the
 submission confirmation dialog.

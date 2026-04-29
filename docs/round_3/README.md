@@ -38,10 +38,10 @@ See [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md) for concrete file-level specs.
 
 ## Data location
 
-R3 historical data lives at `ROUND_3/` (repo root, not under `data/raw/`):
+R3 historical data lives under the canonical raw-data tree:
 ```
-ROUND_3/prices_round_3_day_{0,1,2}.csv
-ROUND_3/trades_round_3_day_{0,1,2}.csv
+data/raw/round_3/prices_round_3_day_{0,1,2}.csv
+data/raw/round_3/trades_round_3_day_{0,1,2}.csv
 ```
 CSV delimiter is `;`. Timestamps run 0 → 999,900 in steps of 100. See EXECUTION_GUIDE for loader pattern.
 

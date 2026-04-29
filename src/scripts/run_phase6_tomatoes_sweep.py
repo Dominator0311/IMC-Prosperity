@@ -24,7 +24,7 @@ muddy the bands because sub-sweep A has no history axis while B and C
 do.
 
 Heatmaps are rendered per slice as a non-blocking diagnostic. See
-``Tutorial/Implementation Plan.md:649`` and the robustness note
+``docs/tutorial/implementation_plan.md`` and the robustness note
 (``docs/phase_6_robustness_note.md``) for context.
 """
 

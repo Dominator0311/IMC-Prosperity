@@ -1,6 +1,6 @@
 # R3 Alpha Atlas — "Options Require Decisions"
 
-**Data source:** `ROUND_3/` (3 historical days, products verified).
+**Data source:** `data/raw/round_3/` (3 historical days, products verified).
 **Verification status:** Derived from first-pass statistical analysis of day-0/1/2 price files. Every number below is reproducible from the CSVs.
 
 ---

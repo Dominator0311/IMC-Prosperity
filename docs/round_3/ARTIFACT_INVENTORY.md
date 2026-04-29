@@ -16,7 +16,7 @@ registered as a git worktree on branch `codex/r3-velvet-options`.
 
 These are small or strategically important enough to keep in git:
 
-- `ROUND_3/` — raw Round 3 price/trade CSVs and the round image.
+- `data/raw/round_3/` — raw Round 3 price/trade CSVs and the round image.
 - `docs/round_3/` — research notes, postmortems, memory docs, and transcripts.
 - `src/scripts/round_3/` — Hydrogel and Velvet research runners.
 - `src/engines/r3_velvet_options_engine.py`

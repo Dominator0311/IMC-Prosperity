@@ -121,9 +121,9 @@ def discover_data_dir(explicit: str | None) -> Path:
     if os.environ.get("ROUND3_DATA_DIR"):
         candidates.append(Path(os.environ["ROUND3_DATA_DIR"]).expanduser())
     candidates += [
-        REPO_ROOT / "ROUND_3",
-        REPO_ROOT.parent / "IMC" / "ROUND_3",
-        Path("/Users/abhinavgupta/Desktop/IMC/ROUND_3"),
+        REPO_ROOT / "data/raw/round_3",
+        REPO_ROOT.parent / "IMC" / "data/raw/round_3",
+        Path("/Users/abhinavgupta/Desktop/IMC/data/raw/round_3"),
     ]
     for candidate in candidates:
         if (candidate / "prices_round_3_day_0.csv").exists():

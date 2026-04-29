@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = REPO_ROOT / "ROUND_3"
+DATA_DIR = REPO_ROOT / "data/raw/round_3"
 
 DAYS = (0, 1, 2)
 

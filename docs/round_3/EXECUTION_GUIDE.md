@@ -15,7 +15,7 @@ PYTHONPATH=. .venv/bin/python -m pytest tests/ -v
 PYTHONPATH=. .venv/bin/python -m pytest tests/unit/ -m unit
 
 # Run replay / backtest (example pattern — adapt paths)
-PYTHONPATH=. .venv/bin/python -m src.scripts.run_backtest --data ROUND_3 --day 0 --strategy hydrogel_mm
+PYTHONPATH=. .venv/bin/python -m src.scripts.run_backtest --data data/raw/round_3 --day 0 --strategy hydrogel_mm
 
 # Build submission bundle
 PYTHONPATH=. .venv/bin/python -m src.scripts.export_submission --output submission_r3.py
@@ -98,7 +98,7 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 
-def load_day(day: int, base: Path = Path("ROUND_3")) -> dict:
+def load_day(day: int, base: Path = Path("data/raw/round_3")) -> dict:
     """Load R3 day N: returns {ts: {product: {'mid', 'bid', 'ask', 'bv', 'av'}}}."""
     snap = defaultdict(dict)
     with open(base / f"prices_round_3_day_{day}.csv") as f:
@@ -117,7 +117,7 @@ def load_day(day: int, base: Path = Path("ROUND_3")) -> dict:
                 continue
     return dict(snap)
 
-def load_trades(day: int, base: Path = Path("ROUND_3")) -> list:
+def load_trades(day: int, base: Path = Path("data/raw/round_3")) -> list:
     trades = []
     with open(base / f"trades_round_3_day_{day}.csv") as f:
         r = csv.DictReader(f, delimiter=";")

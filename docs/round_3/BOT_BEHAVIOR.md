@@ -2,7 +2,7 @@
 
 **Purpose:** document what we can infer about counterparty bot behavior from the R3 tape without access to buyer/seller IDs (the columns are empty in R3), and how to exploit it.
 
-**Data source:** `ROUND_3/trades_round_3_day_{0,1,2}.csv` and the synchronized price CSVs.
+**Data source:** `data/raw/round_3/trades_round_3_day_{0,1,2}.csv` and the synchronized price CSVs.
 
 ---
 

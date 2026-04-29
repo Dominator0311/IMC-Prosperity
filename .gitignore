@@ -70,10 +70,9 @@ docs/round_4/*READOUT*.md
 docs/round_4/*UPLOAD*.md
 docs/round_4/DISCORD*.md
 
-# Live/final-round private artifacts. Publish curated writeups and placeholders
-# first; release final submissions/results only after the competition ends.
+# Live/final-round private artifacts. Public raw CSVs can live under
+# data/raw/round_5/; keep strategies, tests, outputs, and result artifacts local.
 outputs/round_5/
-data/raw/round_5/
 src/scripts/round_5/
 tests/test_r5_*.py
 
